@@ -1,0 +1,14 @@
+{
+  "name": "command-over-chaos",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Command over Chaos (CoC) — modern-warfare multiplayer squad tactics. Spiritual successor to Chain of Command / Call of Combat.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "pnpm --filter @coc/game-server dev & pnpm --filter @coc/client dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}

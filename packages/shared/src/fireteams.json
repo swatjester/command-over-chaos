@@ -1,0 +1,77 @@
+{
+  "$comment": "Data-driven balance. Stats 1-10. Placeholder values pending M1 combat tuning; the balance harness (tools/balance) will sweep these.",
+  "archetypes": [
+    {
+      "id": "infantry",
+      "name": "Rifle Infantry",
+      "ability": "fix_bayonets",
+      "passive": "extra_ammo",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "carbine", "acc": 6, "tough": 6, "speed": 6, "stealth": 4, "aware": 6 },
+        { "role": "Rifleman", "weapon": "carbine_gl", "acc": 5, "tough": 6, "speed": 6, "stealth": 4, "aware": 5 },
+        { "role": "Auto-Rifleman", "weapon": "lmg", "acc": 5, "tough": 7, "speed": 5, "stealth": 3, "aware": 5 },
+        { "role": "Rifleman", "weapon": "carbine", "acc": 5, "tough": 6, "speed": 6, "stealth": 4, "aware": 5 }
+      ]
+    },
+    {
+      "id": "rangers",
+      "name": "Rangers",
+      "ability": "door_charge",
+      "passive": "fast_breach",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "carbine", "acc": 6, "tough": 6, "speed": 7, "stealth": 5, "aware": 6 },
+        { "role": "Breacher", "weapon": "shotgun", "acc": 5, "tough": 7, "speed": 6, "stealth": 4, "aware": 5 },
+        { "role": "Marksman", "weapon": "dmr", "acc": 8, "tough": 5, "speed": 5, "stealth": 5, "aware": 7 },
+        { "role": "Grenadier", "weapon": "gl", "acc": 5, "tough": 6, "speed": 6, "stealth": 4, "aware": 5 }
+      ]
+    },
+    {
+      "id": "commandos",
+      "name": "Commandos",
+      "ability": "ghost",
+      "passive": "suppressed_shots_hidden",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "smg_sd", "acc": 7, "tough": 4, "speed": 7, "stealth": 9, "aware": 7 },
+        { "role": "Operator", "weapon": "carbine_sd", "acc": 7, "tough": 4, "speed": 7, "stealth": 8, "aware": 6 },
+        { "role": "Operator", "weapon": "carbine_sd", "acc": 7, "tough": 4, "speed": 7, "stealth": 8, "aware": 6 },
+        { "role": "Saboteur", "weapon": "smg_sd", "acc": 6, "tough": 4, "speed": 7, "stealth": 9, "aware": 6 }
+      ]
+    },
+    {
+      "id": "airborne",
+      "name": "Airborne",
+      "ability": "insertion",
+      "passive": "fast_vault",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "carbine", "acc": 6, "tough": 5, "speed": 8, "stealth": 5, "aware": 6 },
+        { "role": "Paratrooper", "weapon": "carbine", "acc": 5, "tough": 5, "speed": 8, "stealth": 5, "aware": 5 },
+        { "role": "Paratrooper", "weapon": "carbine", "acc": 5, "tough": 5, "speed": 8, "stealth": 5, "aware": 5 },
+        { "role": "AT Specialist", "weapon": "rocket", "acc": 5, "tough": 5, "speed": 7, "stealth": 4, "aware": 5 }
+      ]
+    },
+    {
+      "id": "recon",
+      "name": "Recon / Marksmen",
+      "ability": "micro_uav",
+      "passive": "counter_intel",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "carbine", "acc": 6, "tough": 5, "speed": 6, "stealth": 7, "aware": 8 },
+        { "role": "Sniper", "weapon": "bolt", "acc": 10, "tough": 4, "speed": 4, "stealth": 8, "aware": 8 },
+        { "role": "Spotter", "weapon": "dmr", "acc": 8, "tough": 4, "speed": 5, "stealth": 7, "aware": 9 },
+        { "role": "Scout", "weapon": "smg", "acc": 5, "tough": 5, "speed": 8, "stealth": 8, "aware": 7 }
+      ]
+    },
+    {
+      "id": "weapons",
+      "name": "Weapons Team",
+      "ability": "emplace",
+      "passive": "heavy_suppression",
+      "soldiers": [
+        { "role": "Team Leader", "weapon": "carbine", "acc": 6, "tough": 6, "speed": 5, "stealth": 3, "aware": 6 },
+        { "role": "MG Gunner", "weapon": "gpmg", "acc": 5, "tough": 7, "speed": 4, "stealth": 2, "aware": 5 },
+        { "role": "Asst. Gunner", "weapon": "carbine", "acc": 5, "tough": 6, "speed": 5, "stealth": 3, "aware": 5 },
+        { "role": "AT Gunner", "weapon": "rocket", "acc": 5, "tough": 6, "speed": 5, "stealth": 3, "aware": 5 }
+      ]
+    }
+  ]
+}
