@@ -1,4 +1,5 @@
 import type { SimState } from "./state.js";
+import { WEAPON_IDS } from "./weapons.js";
 
 /** FNV-1a 32-bit over every numeric field of sim state, in fixed order.
  *  Used for desync detection and CI determinism tests. */
@@ -25,6 +26,9 @@ export function hashState(state: SimState): number {
     mix(s.hp); mix(s.suppression); mix(s.alive ? 1 : 0);
     mix(s.stance === "stand" ? 0 : s.stance === "crouch" ? 1 : 2);
     mix(s.moveMode === "sprint" ? 0 : s.moveMode === "move" ? 1 : s.moveMode === "sneak" ? 2 : 3);
+    mix(WEAPON_IDS.indexOf(s.weapon));
+    mix(s.cooldown);
+    mix(s.targetId ?? -1);
   }
   return h >>> 0;
 }

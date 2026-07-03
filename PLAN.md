@@ -153,7 +153,7 @@ The visible progression is the classic CoC military rank ladder, driven by **Pro
 ### 8.2 Key technical decisions
 - **Determinism first.** The sim package is deterministic from day 1 (seeded RNG, fixed tick, integer math). Buys: cheap replays, desync detection, server-verifiable outcomes, and a future lockstep option.
 - Client-side **order prediction** (your soldier starts moving instantly) with server reconciliation; enemy entities are interpolated 2 ticks back.
-- Pathfinding: navmesh per map with stance-aware clearance (crawl-under gaps, vault links); flow-field fallback for grouped moves.
+- Pathfinding (lands in M2; M0–M1 ship direct movement with wall-slide collision): navmesh per map with stance-aware clearance (crawl-under gaps, vault links); flow-field fallback for grouped moves.
 - LOS: precomputed visibility grid + runtime raycasts against dynamic occluders (smoke, opened doors, destroyed cover).
 - Scale target: 10 players + 40 soldiers + projectiles per match ≈ small state; 1 vCPU per ~8 concurrent matches (validate in M1 benchmark).
 
@@ -186,7 +186,7 @@ fireteam/
 |---|---|---|
 | **M0 — Foundation** | 2–3 wks | Repo, CI, deterministic sim skeleton (tick, movement, LOS grid), Three.js iso camera + placeholder map, single soldier moving with prediction against local server |
 | **M1 — Combat vertical slice** | 4–6 wks | 4-soldier control, stances/movement modes, shot-% engine + UI, cover/suppression, one greybox map, 1v1 over the internet, replay capture. **Benchmark netcode + server density** |
-| **M2 — Squad play** | 4–6 wks | Grenades/smoke (LOS-blocking), buildings + cutaway, buddy actions, 3 archetypes (Infantry/Rangers/Recon), 2v2–4v4, basic lobby, bootcamp tutorial |
+| **M2 — Squad play** | 4–6 wks | **Navmesh pathfinding** (soldiers route around obstacles; stance-aware clearance + vault links — replaces the M0/M1 interim of direct movement with wall-slide collision), grenades/smoke (LOS-blocking), buildings + cutaway, buddy actions, 3 archetypes (Infantry/Rangers/Recon), 2v2–4v4, basic lobby, bootcamp tutorial |
 | **M3 — The meta** | 6–8 wks | All 6 archetypes, Commander layer, PP rank system + hidden MMR, accounts, in-client social (friends/party/chat), stat pipeline (ClickHouse), profile pages, 3 polished maps, closed alpha with ex-CoC community (NA servers) |
 | **M4 — Regiments & esports** | 6–8 wks | Regiment system, regiment ladder + challenge flow, Discord integration/bot, spectator/caster client, tournament mode, replay viewer on web, public stats API, open beta (NA) |
 | **M5 — Polish & launch** | ongoing | Art pass to final quality, map editor, seasonal system, monetization (cosmetics-only), launch tournament |

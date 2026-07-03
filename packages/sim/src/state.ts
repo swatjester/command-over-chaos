@@ -1,8 +1,12 @@
 import type { MapDef, Obstacle } from "./map.js";
 import { MM } from "./math.js";
+import type { WeaponId } from "./weapons.js";
 
 export const TICK_RATE = 30; // Hz
 export const TICK_MS = 1000 / TICK_RATE;
+
+/** Suppression above this pins a soldier: forced crawl-speed movement. */
+export const PIN_THRESHOLD = 70;
 
 export type Stance = "stand" | "crouch" | "prone";
 export type MoveMode = "sprint" | "move" | "sneak" | "crawl";
@@ -21,6 +25,11 @@ export interface Soldier {
   hp: number; // 0-100
   suppression: number; // 0-100
   alive: boolean;
+  weapon: WeaponId;
+  /** ticks until this soldier can fire again */
+  cooldown: number;
+  /** explicit fire order target; null = fire at will */
+  targetId: number | null;
 }
 
 export interface SimState {
@@ -29,7 +38,7 @@ export interface SimState {
   rng: number; // PRNG state
   mapW: number; // mm
   mapH: number; // mm
-  obstacles: Obstacle[]; // static collision geometry
+  obstacles: Obstacle[]; // static collision + LOS geometry
   soldiers: Soldier[];
 }
 
@@ -53,12 +62,15 @@ export function createState(seed: number, map?: MapDef): SimState {
   };
 }
 
-export function spawnSoldier(s: SimState, team: 0 | 1, x: number, y: number): Soldier {
+export function spawnSoldier(
+  s: SimState, team: 0 | 1, x: number, y: number, weapon: WeaponId = "carbine",
+): Soldier {
   const soldier: Soldier = {
     id: s.soldiers.length,
     team, x, y, tx: null, ty: null,
     stance: "stand", moveMode: "move",
     hp: 100, suppression: 0, alive: true,
+    weapon, cooldown: 0, targetId: null,
   };
   s.soldiers.push(soldier);
   return soldier;

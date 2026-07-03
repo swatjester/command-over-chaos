@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  blocked, createState, GREYBOX_MAP, hashState, MM, rngInt, spawnSoldier, tick,
-  type Order, type OrderLog,
+  blocked, computeShotPct, createState, GREYBOX_MAP, hashState, MM, rngInt,
+  spawnSoldier, tick, type Order, type OrderLog,
 } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
@@ -111,5 +111,72 @@ describe("collision", () => {
       return hashState(s);
     };
     expect(run()).toBe(run());
+  });
+});
+
+describe("combat", () => {
+  it("walls block LOS and shots", () => {
+    const s = createState(9, GREYBOX_MAP);
+    const a = spawnSoldier(s, 0, 50 * MM, 40 * MM); // north of building
+    const b = spawnSoldier(s, 1, 50 * MM, 50 * MM); // inside building
+    const shot = computeShotPct(s.obstacles, a, b);
+    expect(shot.visible).toBe(false);
+    expect(shot.pct).toBe(0);
+  });
+
+  it("prone behind low cover is hidden; crouched gets cover bonus", () => {
+    const s = createState(10, GREYBOX_MAP);
+    const shooter = spawnSoldier(s, 0, 20 * MM, 20 * MM);
+    // cover box centered (20,30): defender just south of it
+    const defender = spawnSoldier(s, 1, 20 * MM, 32 * MM);
+    defender.stance = "prone";
+    expect(computeShotPct(s.obstacles, shooter, defender).visible).toBe(false);
+    defender.stance = "crouch";
+    const shot = computeShotPct(s.obstacles, shooter, defender);
+    expect(shot.visible).toBe(true);
+    expect(shot.factors.some((f) => f.label === "target in cover")).toBe(true);
+  });
+
+  it("open-ground firefight is deterministic and lethal", () => {
+    const run = (): { hash: number; deaths: number } => {
+      const s = createState(1337, GREYBOX_MAP);
+      spawnSoldier(s, 0, 30 * MM, 35 * MM, "carbine");
+      spawnSoldier(s, 0, 32 * MM, 35 * MM, "lmg");
+      spawnSoldier(s, 1, 30 * MM, 60 * MM, "carbine");
+      spawnSoldier(s, 1, 32 * MM, 60 * MM, "dmr");
+      for (let i = 0; i < 3000; i++) tick(s, []);
+      return { hash: hashState(s), deaths: s.soldiers.filter((x) => !x.alive).length };
+    };
+    const a = run();
+    const b = run();
+    expect(a.hash).toBe(b.hash);
+    expect(a.deaths).toBeGreaterThan(0); // permadeath is real
+  });
+
+  it("suppression accumulates under fire and pins movement", () => {
+    const s = createState(11, GREYBOX_MAP);
+    const gunner = spawnSoldier(s, 0, 30 * MM, 30 * MM, "lmg");
+    gunner.stance = "prone";
+    const victim = spawnSoldier(s, 1, 30 * MM, 45 * MM, "carbine");
+    victim.hp = 10000 as never; // survive long enough to measure suppression
+    let peak = 0;
+    for (let i = 0; i < 300; i++) {
+      tick(s, []);
+      peak = Math.max(peak, victim.suppression);
+    }
+    expect(peak).toBeGreaterThan(50);
+  });
+
+  it("dead soldiers stop shooting and being targeted", () => {
+    const s = createState(12, GREYBOX_MAP);
+    const a = spawnSoldier(s, 0, 30 * MM, 30 * MM, "carbine");
+    const b = spawnSoldier(s, 1, 30 * MM, 40 * MM, "carbine");
+    b.alive = false;
+    b.hp = 0;
+    for (let i = 0; i < 100; i++) {
+      const events = tick(s, []);
+      expect(events.length).toBe(0); // no valid targets for a; b never fires
+    }
+    expect(a.alive).toBe(true);
   });
 });

@@ -1,19 +1,22 @@
 /**
- * Three.js isometric scene — M0 greybox.
- * Orthographic camera at the classic iso pitch; yaw rotatable via
- * middle-mouse drag; procedural map (ground + cover boxes + one building
- * shell); capsule soldiers. World units: meters (sim mm / 1000).
+ * Three.js isometric scene — M1.
+ * Orthographic camera at the classic iso pitch; yaw rotatable via middle-mouse
+ * drag; map rendered from sim data; capsule soldiers; tracers; corpses.
+ * World units: meters (sim mm / 1000).
  */
 import * as THREE from "three";
-import type { SoldierSnapshot } from "@coc/protocol";
+import type { ShotEvent, SoldierSnapshot } from "@coc/protocol";
 import { GREYBOX_MAP } from "@coc/sim";
 
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch ≈ 35.26°
 
 export interface SceneApi {
   updateSoldiers(soldiers: SoldierSnapshot[], mySoldierIds: number[], selectedId: number | null): void;
+  addShotEvents(events: ShotEvent[]): void;
   onGroundClick(cb: (xMm: number, yMm: number) => void): void;
   onSoldierClick(cb: (id: number) => void): void;
+  onAttack(cb: (targetId: number) => void): void;
+  onHover(cb: (targetId: number | null, screenX: number, screenY: number) => void): void;
   dispose(): void;
 }
 
@@ -59,7 +62,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   sun.shadow.mapSize.set(2048, 2048);
   scene.add(sun);
 
-  // --- greybox map (procedural, deterministic layout) -----------------------
+  // --- map from sim data (what you see is what collides) --------------------
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(100, 100),
     new THREE.MeshStandardMaterial({ color: 0x39413b, roughness: 0.95 }),
@@ -74,7 +77,6 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   grid.position.set(50, 0.01, 50);
   scene.add(grid);
 
-  // obstacles come straight from sim map data — what you see is what collides
   const coverMat = new THREE.MeshStandardMaterial({ color: 0x555d66, roughness: 0.8 });
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x6e6a60, roughness: 0.9 });
   for (const o of GREYBOX_MAP.obstacles) {
@@ -94,6 +96,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   scene.add(soldierGroup);
   const soldierMeshes = new Map<number, THREE.Group>();
   const TEAM_COLORS = [0x4da3ff, 0xff9e4d] as const;
+  let mySet = new Set<number>();
+  let lastSoldiers = new Map<number, SoldierSnapshot>();
 
   function makeSoldier(team: 0 | 1, mine: boolean): THREE.Group {
     const g = new THREE.Group();
@@ -117,16 +121,21 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     ring.position.y = 0.02;
     ring.name = "selection";
     g.add(body, head, ring);
+    g.userData.bodyMat = bodyMat;
     return g;
   }
 
   function updateSoldiers(
     soldiers: SoldierSnapshot[], mySoldierIds: number[], selectedId: number | null,
   ): void {
+    mySet = new Set(mySoldierIds);
+    lastSoldiers = new Map(soldiers.map((s) => [s.id, s]));
+    const seen = new Set<number>();
     for (const s of soldiers) {
+      seen.add(s.id);
       let g = soldierMeshes.get(s.id);
       if (!g) {
-        g = makeSoldier(s.team, mySoldierIds.includes(s.id));
+        g = makeSoldier(s.team, mySet.has(s.id));
         g.userData.soldierId = s.id;
         soldierMeshes.set(s.id, g);
         soldierGroup.add(g);
@@ -134,40 +143,88 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       }
       // smooth interpolation toward authoritative position
       g.userData.target = new THREE.Vector3(s.x / 1000, 0, s.y / 1000);
-      g.visible = s.alive;
       const ring = g.getObjectByName("selection") as THREE.Mesh;
-      (ring.material as THREE.MeshBasicMaterial).opacity = s.id === selectedId ? 0.9 : 0;
-      const scale = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
-      g.scale.y = scale;
+      (ring.material as THREE.MeshBasicMaterial).opacity = s.id === selectedId && s.alive ? 0.9 : 0;
+      if (!s.alive && !g.userData.dead) {
+        g.userData.dead = true;
+        const mat = g.userData.bodyMat as THREE.MeshStandardMaterial;
+        mat.color.multiplyScalar(0.25);
+        mat.emissiveIntensity = 0;
+        g.scale.y = 0.18; // fallen
+      } else if (s.alive) {
+        g.scale.y = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
+      }
+    }
+    // fog: enemies the server stopped sending vanish from view
+    for (const [id, g] of soldierMeshes) {
+      g.visible = seen.has(id) || mySet.has(id);
     }
   }
 
-  // --- picking --------------------------------------------------------------
+  // --- tracers ---------------------------------------------------------------
+  const tracers: Array<{ line: THREE.Line; ttl: number; max: number }> = [];
+  function addShotEvents(events: ShotEvent[]): void {
+    for (const e of events) {
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(e.sx / 1000, 1.3, e.sy / 1000),
+        new THREE.Vector3(e.tx / 1000, 1.1, e.ty / 1000),
+      ]);
+      const mat = new THREE.LineBasicMaterial({
+        color: e.kill ? 0xff5544 : e.hit ? 0xffd27d : 0x8fa3b8,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const line = new THREE.Line(geo, mat);
+      scene.add(line);
+      tracers.push({ line, ttl: 0.25, max: 0.25 });
+    }
+  }
+
+  // --- picking / hover --------------------------------------------------------
   const raycaster = new THREE.Raycaster();
   let groundCb: ((x: number, y: number) => void) | null = null;
   let soldierCb: ((id: number) => void) | null = null;
+  let attackCb: ((id: number) => void) | null = null;
+  let hoverCb: ((id: number | null, sx: number, sy: number) => void) | null = null;
 
-  function pick(e: PointerEvent): void {
+  function raycastSoldier(e: PointerEvent): number | null {
     const rect = canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
     raycaster.setFromCamera(ndc, camera);
-    if (e.button === 0 && soldierCb) {
-      const hits = raycaster.intersectObjects(soldierGroup.children, true);
-      const hit = hits.find((h) => h.object.parent?.userData.soldierId !== undefined);
-      if (hit) {
-        soldierCb(hit.object.parent!.userData.soldierId as number);
+    const hits = raycaster.intersectObjects(soldierGroup.children, true);
+    for (const h of hits) {
+      const id = h.object.parent?.userData.soldierId as number | undefined;
+      if (id !== undefined && soldierMeshes.get(id)?.visible) return id;
+    }
+    return null;
+  }
+
+  function pick(e: PointerEvent): void {
+    const id = raycastSoldier(e);
+    if (e.button === 0) {
+      if (id !== null && mySet.has(id) && lastSoldiers.get(id)?.alive) soldierCb?.(id);
+      return;
+    }
+    if (e.button === 2) {
+      if (id !== null && !mySet.has(id) && lastSoldiers.get(id)?.alive) {
+        attackCb?.(id);
         return;
       }
-    }
-    if (e.button === 2 && groundCb) {
+      const rect = canvas.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
       const hit = raycaster.intersectObject(ground, false)[0];
-      if (hit) groundCb(Math.round(hit.point.x * 1000), Math.round(hit.point.z * 1000));
+      if (hit && groundCb) groundCb(Math.round(hit.point.x * 1000), Math.round(hit.point.z * 1000));
     }
   }
-  // --- input: pick, middle-drag rotate, WASD/edge pan, wheel zoom -----------
+
+  // --- input: pick, hover, middle-drag rotate, WASD pan, wheel zoom ----------
   let rotating = false;
   let lastRotX = 0;
   canvas.addEventListener("pointerdown", (e) => {
@@ -185,7 +242,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       yaw += (e.clientX - lastRotX) * 0.008;
       lastRotX = e.clientX;
       layoutCamera();
+      return;
     }
+    const id = raycastSoldier(e);
+    const hostile = id !== null && !mySet.has(id) && lastSoldiers.get(id)?.alive;
+    canvas.style.cursor = hostile ? "crosshair" : "default";
+    hoverCb?.(hostile ? id : null, e.clientX, e.clientY);
   });
   const endRotate = (e: PointerEvent): void => {
     if (e.button === 1) rotating = false;
@@ -221,6 +283,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       if (t) g.position.lerp(t, Math.min(1, dt * 12));
     }
 
+    for (let i = tracers.length - 1; i >= 0; i--) {
+      const tr = tracers[i]!;
+      tr.ttl -= dt;
+      if (tr.ttl <= 0) {
+        scene.remove(tr.line);
+        tr.line.geometry.dispose();
+        (tr.line.material as THREE.Material).dispose();
+        tracers.splice(i, 1);
+      } else {
+        (tr.line.material as THREE.LineBasicMaterial).opacity = 0.9 * (tr.ttl / tr.max);
+      }
+    }
+
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (canvas.width !== w * devicePixelRatio || canvas.height !== h * devicePixelRatio) {
       renderer.setSize(w, h, false);
@@ -233,8 +308,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
 
   return {
     updateSoldiers,
+    addShotEvents,
     onGroundClick: (cb) => { groundCb = cb; },
     onSoldierClick: (cb) => { soldierCb = cb; },
+    onAttack: (cb) => { attackCb = cb; },
+    onHover: (cb) => { hoverCb = cb; },
     dispose: () => { disposed = true; renderer.dispose(); },
   };
 }

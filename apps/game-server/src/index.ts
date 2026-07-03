@@ -1,19 +1,23 @@
 /**
- * CoC authoritative match server — M0.
+ * CoC authoritative match server — M1.
  * One process = one match. ws transport (uWebSockets.js/WebTransport later).
- * Fixed 30Hz tick; all game rules live in @coc/sim.
+ * Fixed 30Hz tick; all game rules live in @coc/sim. Snapshots are fog-culled
+ * per team: the client never receives enemies its team cannot see.
  */
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  createState, GREYBOX_MAP, hashState, MM, spawnSoldier, tick, TICK_MS, TICK_RATE, type Order,
+  createState, GREYBOX_MAP, hashState, losBetween, MM, spawnSoldier, tick,
+  TICK_MS, TICK_RATE, type Order, type ShotEvent, type Soldier, type WeaponId,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
 import { DEFAULT_SERVER_PORT } from "@coc/shared";
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
+const FIRETEAM_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
 
 const state = createState(Date.now() >>> 0, GREYBOX_MAP);
 const pendingOrders: Order[] = [];
+let pendingEvents: ShotEvent[] = [];
 
 interface Player {
   id: string;
@@ -31,8 +35,8 @@ wss.on("connection", (ws) => {
   const team = (nextPlayerNum % 2) as 0 | 1;
   const spawnY = team === 0 ? 10 * MM : 90 * MM;
   const baseX = 30 * MM + Math.floor(nextPlayerNum / 2) * (15 * MM);
-  const soldierIds = Array.from({ length: 4 }, (_, i) => {
-    return spawnSoldier(state, team, baseX + i * (3 * MM), spawnY).id;
+  const soldierIds = FIRETEAM_WEAPONS.map((weapon, i) => {
+    return spawnSoldier(state, team, baseX + i * (3 * MM), spawnY, weapon).id;
   });
   const player: Player = { id: `p${nextPlayerNum++}`, team, soldierIds, ws };
   players.set(ws, player);
@@ -82,20 +86,30 @@ setInterval(() => {
   while (acc >= TICK_MS) {
     acc -= TICK_MS;
     const orders = pendingOrders.splice(0);
-    tick(state, orders);
-    if (state.tick % 3 === 0) broadcast(); // snapshots at 10Hz for M0
+    pendingEvents.push(...tick(state, orders));
+    if (state.tick % 3 === 0) broadcast(); // snapshots at 10Hz for M0/M1
   }
 }, 4);
 
+/** Fog rule: own team always; enemy soldiers only while some living ally sees them. */
+function visibleTo(team: 0 | 1): Soldier[] {
+  return state.soldiers.filter((s) => {
+    if (s.team === team) return true;
+    return state.soldiers.some(
+      (a) => a.team === team && a.alive && losBetween(state.obstacles, a, s).visible,
+    );
+  });
+}
+
 function broadcast(): void {
-  const msg: ServerMsg = {
-    t: "snapshot",
-    tick: state.tick,
-    hash: hashState(state),
-    soldiers: state.soldiers,
+  const events = pendingEvents;
+  pendingEvents = [];
+  const hash = hashState(state);
+  const byTeam: Record<0 | 1, string> = {
+    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), events } satisfies ServerMsg),
+    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), events } satisfies ServerMsg),
   };
-  const data = JSON.stringify(msg);
   for (const p of players.values()) {
-    if (p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
+    if (p.ws.readyState === WebSocket.OPEN) p.ws.send(byTeam[p.team]);
   }
 }

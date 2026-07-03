@@ -1,24 +1,27 @@
 /**
  * Connection layer. Tries the local match server; if unreachable, falls back
  * to an OFFLINE local sim (same @coc/sim code — that's the point) so the
- * client is always demoable.
+ * client is always demoable. Offline mode has no fog: you see both teams.
  */
 import {
-  createState, GREYBOX_MAP, MM, spawnSoldier, tick, TICK_MS, type Order, type SimState,
+  createState, GREYBOX_MAP, MM, spawnSoldier, tick, TICK_MS,
+  type Order, type ShotEvent, type SimState, type WeaponId,
 } from "@coc/sim";
 import { ServerMsgSchema, type ClientMsg, type SoldierSnapshot } from "@coc/protocol";
+
+export type SnapshotCb = (soldiers: SoldierSnapshot[], tick: number, events: ShotEvent[]) => void;
 
 export interface Connection {
   mode: "online" | "offline";
   mySoldierIds: number[];
   sendOrders(orders: Order[]): void;
-  onSnapshot(cb: (soldiers: SoldierSnapshot[], tick: number) => void): void;
+  onSnapshot(cb: SnapshotCb): void;
   close(): void;
 }
 
 export function connect(url = "ws://localhost:8787"): Promise<Connection> {
   return new Promise((resolve) => {
-    let snapshotCb: ((s: SoldierSnapshot[], t: number) => void) | null = null;
+    let snapshotCb: SnapshotCb | null = null;
     const ws = new WebSocket(url);
     const timeout = setTimeout(() => { ws.close(); resolve(offline()); }, 1500);
 
@@ -42,22 +45,24 @@ export function connect(url = "ws://localhost:8787"): Promise<Connection> {
           close: () => ws.close(),
         });
       } else if (msg.t === "snapshot") {
-        snapshotCb?.(msg.soldiers, msg.tick);
+        snapshotCb?.(msg.soldiers, msg.tick, msg.events);
       }
     };
   });
 }
 
+const OFFLINE_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
+
 function offline(): Connection {
   const state: SimState = createState(20260702, GREYBOX_MAP);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (40 + i * 3) * MM, 20 * MM);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (40 + i * 3) * MM, 80 * MM);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (40 + i * 3) * MM, 20 * MM, OFFLINE_WEAPONS[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (40 + i * 3) * MM, 80 * MM, OFFLINE_WEAPONS[i]);
   let pending: Order[] = [];
-  let snapshotCb: ((s: SoldierSnapshot[], t: number) => void) | null = null;
+  let snapshotCb: SnapshotCb | null = null;
 
   const interval = setInterval(() => {
-    tick(state, pending.splice(0));
-    snapshotCb?.(structuredClone(state.soldiers), state.tick);
+    const events = tick(state, pending.splice(0));
+    snapshotCb?.(structuredClone(state.soldiers), state.tick, events);
   }, TICK_MS);
 
   return {
