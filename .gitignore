@@ -6,3 +6,8 @@ dist/
 .DS_Store
 coverage/
 .turbo/
+
+# never commit build output emitted next to source
+packages/*/src/*.js
+packages/*/src/*.d.ts
+packages/*/src/*.js.map
