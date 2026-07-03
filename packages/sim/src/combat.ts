@@ -3,7 +3,7 @@
  * plain soldier-shaped objects, so the client can call it on snapshots to
  * render the exact number the server will roll against.
  */
-import { losBetween } from "./los.js";
+import { losBetween, type SmokeCloud } from "./los.js";
 import type { Obstacle } from "./map.js";
 import { dist } from "./math.js";
 import type { MoveMode, Stance } from "./state.js";
@@ -45,14 +45,15 @@ const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settlin
 
 export function computeShotPct(
   obstacles: readonly Obstacle[], shooter: Combatant, target: Combatant,
+  smokes: readonly SmokeCloud[] = [],
 ): ShotPct {
   const w = WEAPONS[shooter.weapon];
   const d = dist(shooter.x, shooter.y, target.x, target.y);
   if (d > w.maxRange) {
-    const los = losBetween(obstacles, shooter, target);
+    const los = losBetween(obstacles, shooter, target, smokes);
     return { ...NO_SHOT, visible: los.visible, inRange: false };
   }
-  const los = losBetween(obstacles, shooter, target);
+  const los = losBetween(obstacles, shooter, target, smokes);
   if (!los.visible) return { ...NO_SHOT, visible: false, inRange: true };
 
   // long-range shots require a settled (stationary) shooter

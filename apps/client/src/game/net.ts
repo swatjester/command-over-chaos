@@ -5,11 +5,22 @@
  */
 import {
   ACTIVE_MAP, createState, MM, spawnSoldier, tick, TICK_MS,
-  type Order, type ShotEvent, type SimState, type WeaponId,
+  type Order, type SimState, type WeaponId,
 } from "@coc/sim";
-import { ServerMsgSchema, type ClientMsg, type SoldierSnapshot } from "@coc/protocol";
+import {
+  ServerMsgSchema, type Boom, type ClientMsg, type GrenadeSnapshot,
+  type ShotEvent, type SmokeSnapshot, type SoldierSnapshot,
+} from "@coc/protocol";
 
-export type SnapshotCb = (soldiers: SoldierSnapshot[], tick: number, events: ShotEvent[]) => void;
+export interface SnapshotData {
+  soldiers: SoldierSnapshot[];
+  tick: number;
+  shots: ShotEvent[];
+  booms: Boom[];
+  grenades: GrenadeSnapshot[];
+  smokes: SmokeSnapshot[];
+}
+export type SnapshotCb = (data: SnapshotData) => void;
 
 export interface Connection {
   mode: "online" | "offline";
@@ -45,7 +56,7 @@ export function connect(url = "ws://localhost:8787"): Promise<Connection> {
           close: () => ws.close(),
         });
       } else if (msg.t === "snapshot") {
-        snapshotCb?.(msg.soldiers, msg.tick, msg.events);
+        snapshotCb?.(msg);
       }
     };
   });
@@ -62,8 +73,15 @@ function offline(): Connection {
   let snapshotCb: SnapshotCb | null = null;
 
   const interval = setInterval(() => {
-    const events = tick(state, pending.splice(0));
-    snapshotCb?.(structuredClone(state.soldiers), state.tick, events);
+    const ev = tick(state, pending.splice(0));
+    snapshotCb?.({
+      soldiers: structuredClone(state.soldiers),
+      tick: state.tick,
+      shots: ev.shots,
+      booms: ev.booms,
+      grenades: structuredClone(state.grenades),
+      smokes: structuredClone(state.smokes),
+    });
   }, TICK_MS);
 
   return {

@@ -2,6 +2,7 @@ export * from "./math.js";
 export * from "./rng.js";
 export * from "./map.js";
 export * from "./weapons.js";
+export * from "./grenades.js";
 export * from "./state.js";
 export * from "./orders.js";
 export * from "./los.js";

@@ -5,6 +5,7 @@ import { z } from "zod";
 export const MoveModeSchema = z.enum(["sprint", "move", "sneak", "crawl"]);
 export const StanceSchema = z.enum(["stand", "crouch", "prone"]);
 export const WeaponIdSchema = z.enum(["carbine", "smg", "dmr", "lmg"]);
+export const GrenadeKindSchema = z.enum(["frag", "smoke"]);
 
 export const OrderSchema = z.discriminatedUnion("type", [
   z.object({
@@ -13,6 +14,12 @@ export const OrderSchema = z.discriminatedUnion("type", [
     x: z.number().int(),
     y: z.number().int(),
     mode: MoveModeSchema.optional(),
+    queue: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal("mode"),
+    soldierId: z.number().int().nonnegative(),
+    mode: MoveModeSchema,
   }),
   z.object({
     type: z.literal("stance"),
@@ -25,6 +32,13 @@ export const OrderSchema = z.discriminatedUnion("type", [
     targetId: z.number().int().nonnegative().nullable(),
   }),
   z.object({
+    type: z.literal("throw"),
+    soldierId: z.number().int().nonnegative(),
+    kind: GrenadeKindSchema,
+    x: z.number().int(),
+    y: z.number().int(),
+  }),
+  z.object({
     type: z.literal("halt"),
     soldierId: z.number().int().nonnegative(),
   }),
@@ -32,7 +46,7 @@ export const OrderSchema = z.discriminatedUnion("type", [
 
 export const ClientMsgSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("join"), name: z.string().min(1).max(24) }),
-  z.object({ t: z.literal("orders"), orders: z.array(OrderSchema).max(16) }),
+  z.object({ t: z.literal("orders"), orders: z.array(OrderSchema).max(32) }),
   z.object({ t: z.literal("ping"), n: z.number().int() }),
 ]);
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;
@@ -55,6 +69,9 @@ export const SoldierSnapshotSchema = z.object({
   targetId: z.number().int().nullable(),
   aimId: z.number().int().nullable(),
   settle: z.number().int(),
+  frags: z.number().int(),
+  smokes: z.number().int(),
+  queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 
 export const ShotEventSchema = z.object({
@@ -66,6 +83,31 @@ export const ShotEventSchema = z.object({
   sy: z.number().int(),
   tx: z.number().int(),
   ty: z.number().int(),
+});
+
+export const GrenadeSnapshotSchema = z.object({
+  id: z.number().int(),
+  kind: GrenadeKindSchema,
+  sx: z.number().int(),
+  sy: z.number().int(),
+  x: z.number().int(),
+  y: z.number().int(),
+  thrownTick: z.number().int(),
+  landTick: z.number().int(),
+});
+
+export const SmokeSnapshotSchema = z.object({
+  id: z.number().int(),
+  x: z.number().int(),
+  y: z.number().int(),
+  r: z.number().int(),
+  ttl: z.number().int(),
+});
+
+export const BoomSchema = z.object({
+  x: z.number().int(),
+  y: z.number().int(),
+  kind: GrenadeKindSchema,
 });
 
 export const ServerMsgSchema = z.discriminatedUnion("t", [
@@ -84,10 +126,16 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
     hash: z.number().int(),
     /** own team always; enemies only while your team has LOS (server-culled fog) */
     soldiers: z.array(SoldierSnapshotSchema),
-    events: z.array(ShotEventSchema),
+    shots: z.array(ShotEventSchema),
+    booms: z.array(BoomSchema),
+    grenades: z.array(GrenadeSnapshotSchema),
+    smokes: z.array(SmokeSnapshotSchema),
   }),
   z.object({ t: z.literal("pong"), n: z.number().int() }),
 ]);
 export type ServerMsg = z.infer<typeof ServerMsgSchema>;
 export type SoldierSnapshot = z.infer<typeof SoldierSnapshotSchema>;
 export type ShotEvent = z.infer<typeof ShotEventSchema>;
+export type GrenadeSnapshot = z.infer<typeof GrenadeSnapshotSchema>;
+export type SmokeSnapshot = z.infer<typeof SmokeSnapshotSchema>;
+export type Boom = z.infer<typeof BoomSchema>;

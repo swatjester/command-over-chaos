@@ -26,6 +26,33 @@ export function segmentIntersectsBox(
   return true;
 }
 
+export interface SmokeCloud { id: number; x: number; y: number; r: number; ttl: number; }
+
+/**
+ * Exact integer segment-vs-circle (>>6 scaling keeps all products < 2^53;
+ * 64mm precision is irrelevant at smoke scale).
+ */
+export function segmentIntersectsCircle(
+  x1: number, y1: number, x2: number, y2: number, cx: number, cy: number, r: number,
+): boolean {
+  if (Math.max(x1, x2) < cx - r || Math.min(x1, x2) > cx + r) return false;
+  if (Math.max(y1, y2) < cy - r || Math.min(y1, y2) > cy + r) return false;
+  const X1 = x1 >> 6, Y1 = y1 >> 6, X2 = x2 >> 6, Y2 = y2 >> 6;
+  const CX = cx >> 6, CY = cy >> 6, R = (r >> 6) + 1;
+  const dx = X2 - X1, dy = Y2 - Y1;
+  const len2 = dx * dx + dy * dy;
+  const inR = (px: number, py: number): boolean => {
+    const ddx = CX - px, ddy = CY - py;
+    return ddx * ddx + ddy * ddy <= R * R;
+  };
+  if (len2 === 0) return inR(X1, Y1);
+  const tNum = (CX - X1) * dx + (CY - Y1) * dy;
+  if (tNum <= 0) return inR(X1, Y1);
+  if (tNum >= len2) return inR(X2, Y2);
+  const cross = dx * (CY - Y1) - dy * (CX - X1);
+  return cross * cross <= R * R * len2;
+}
+
 export interface LosSubject { x: number; y: number; stance: Stance; }
 export interface LosResult { visible: boolean; targetInCover: boolean; }
 
@@ -39,7 +66,13 @@ export interface LosResult { visible: boolean; targetInCover: boolean; }
  */
 export function losBetween(
   obstacles: readonly Obstacle[], shooter: LosSubject, target: LosSubject,
+  smokes: readonly SmokeCloud[] = [],
 ): LosResult {
+  for (const c of smokes) {
+    if (segmentIntersectsCircle(shooter.x, shooter.y, target.x, target.y, c.x, c.y, c.r)) {
+      return { visible: false, targetInCover: false };
+    }
+  }
   let targetInCover = false;
   for (const o of obstacles) {
     if (!segmentIntersectsBox(shooter.x, shooter.y, target.x, target.y, o)) continue;

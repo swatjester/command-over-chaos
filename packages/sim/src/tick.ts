@@ -1,4 +1,5 @@
 import { computeShotPct } from "./combat.js";
+import { GRENADES, type Boom } from "./grenades.js";
 import { losBetween } from "./los.js";
 import { blocked } from "./map.js";
 import { clamp, dist, stepToward } from "./math.js";
@@ -16,22 +17,40 @@ export interface ShotEvent {
   sx: number; sy: number; tx: number; ty: number;
 }
 
+export interface TickEvents {
+  shots: ShotEvent[];
+  booms: Boom[];
+}
+
+const MAX_QUEUE = 8;
+
 /**
  * Advance the world exactly one tick. Pure with respect to (state, orders):
  * mutates `state` in place (hot path) but reads nothing else — no clocks,
  * no Math.random, no iteration over unordered collections.
  */
-export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
+export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   // 1. apply orders (sorted by soldierId for determinism regardless of arrival order)
   const sorted = [...orders].sort((a, b) => a.soldierId - b.soldierId);
   for (const o of sorted) {
     const s = state.soldiers[o.soldierId];
     if (!s || !s.alive) continue;
     switch (o.type) {
-      case "move":
-        s.tx = clamp(Math.floor(o.x), 0, state.mapW);
-        s.ty = clamp(Math.floor(o.y), 0, state.mapH);
-        if (o.mode) s.moveMode = o.mode;
+      case "move": {
+        const mx = clamp(Math.floor(o.x), 0, state.mapW);
+        const my = clamp(Math.floor(o.y), 0, state.mapH);
+        if (o.queue && s.tx !== null) {
+          if (s.queue.length < MAX_QUEUE) s.queue.push([mx, my]);
+        } else {
+          s.tx = mx;
+          s.ty = my;
+          s.queue = [];
+          if (o.mode) s.moveMode = o.mode;
+        }
+        break;
+      }
+      case "mode":
+        s.moveMode = o.mode;
         break;
       case "stance":
         s.stance = o.stance;
@@ -41,14 +60,40 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
         s.targetId = t && t.alive && t.team !== s.team ? t.id : null;
         break;
       }
+      case "throw": {
+        const def = GRENADES[o.kind];
+        const have = o.kind === "frag" ? s.frags : s.smokes;
+        if (have <= 0) break;
+        let gx = clamp(Math.floor(o.x), 0, state.mapW);
+        let gy = clamp(Math.floor(o.y), 0, state.mapH);
+        const d = dist(s.x, s.y, gx, gy);
+        if (d > def.throwRange) {
+          gx = s.x + Math.floor(((gx - s.x) * def.throwRange) / d);
+          gy = s.y + Math.floor(((gy - s.y) * def.throwRange) / d);
+        }
+        const flight = Math.max(10, Math.ceil(Math.min(d, def.throwRange) / def.flightSpeed));
+        const landTick = state.tick + flight;
+        state.grenades.push({
+          id: state.nextGrenadeId++,
+          kind: o.kind,
+          thrower: s.id,
+          sx: s.x, sy: s.y, x: gx, y: gy,
+          thrownTick: state.tick,
+          landTick,
+          explodeTick: landTick + def.fuseAfterLand,
+        });
+        if (o.kind === "frag") s.frags -= 1; else s.smokes -= 1;
+        break;
+      }
       case "halt":
         s.tx = null;
         s.ty = null;
+        s.queue = [];
         break;
     }
   }
 
-  // 2. movement with AABB collision + wall slide
+  // 2. movement with AABB collision + wall slide, waypoint queue
   //    (no pathfinding yet — soldiers slide along walls; navmesh lands in M2)
   const prevPos = state.soldiers.map((s) => s.x * 0x40000000 + s.y); // cheap pos key
   for (const s of state.soldiers) {
@@ -60,8 +105,14 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
       s.x = nx;
       s.y = ny;
       if (arrived) {
-        s.tx = null;
-        s.ty = null;
+        const next = s.queue.shift();
+        if (next) {
+          s.tx = next[0];
+          s.ty = next[1];
+        } else {
+          s.tx = null;
+          s.ty = null;
+        }
       }
     } else if (nx !== s.x && !blocked(state.obstacles, nx, s.y)) {
       s.x = nx; // slide along y-facing wall
@@ -71,11 +122,10 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
       // fully wedged (e.g., target inside an obstacle): stop cleanly
       s.tx = null;
       s.ty = null;
+      s.queue = [];
     }
   }
 
-  // 3. combat — id order for determinism; simultaneous within a tick
-  //    (a soldier killed this tick may still get their queued shot off)
   // settle: stillness accumulates, any movement resets (long-range gate)
   for (let i = 0; i < state.soldiers.length; i++) {
     const s = state.soldiers[i]!;
@@ -83,10 +133,48 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
     s.settle = s.x * 0x40000000 + s.y === prevPos[i] ? Math.min(s.settle + 1, 240) : 0;
   }
 
-  // Two-phase resolution: all shots roll against PRE-damage state, then
-  // effects apply. Fire within a tick is simultaneous — no id-order advantage,
-  // and mutual kills are possible (as they should be).
-  const events: ShotEvent[] = [];
+  // 3. grenades: flight, landing, detonation
+  const booms: Boom[] = [];
+  for (let i = state.grenades.length - 1; i >= 0; i--) {
+    const g = state.grenades[i]!;
+    if (g.kind === "smoke" && state.tick >= g.landTick) {
+      state.smokes.push({ id: g.id, x: g.x, y: g.y, r: GRENADES.smoke.cloudRadius, ttl: GRENADES.smoke.cloudTtl });
+      booms.push({ x: g.x, y: g.y, kind: "smoke" });
+      state.grenades.splice(i, 1);
+    } else if (g.kind === "frag" && state.tick >= g.explodeTick) {
+      const def = GRENADES.frag;
+      for (const s of state.soldiers) {
+        if (!s.alive) continue;
+        const d = dist(s.x, s.y, g.x, g.y);
+        if (d <= def.radius) {
+          s.hp -= def.maxDamage - Math.floor(((def.maxDamage - def.minDamage) * d) / def.radius);
+          if (s.hp <= 0) {
+            s.hp = 0;
+            s.alive = false;
+            s.tx = null;
+            s.ty = null;
+            s.queue = [];
+          }
+        }
+        if (s.alive && d <= def.suppressRadius) {
+          s.suppression = Math.min(100, s.suppression + def.suppression - Math.floor((20 * d) / def.suppressRadius));
+        }
+      }
+      booms.push({ x: g.x, y: g.y, kind: "frag" });
+      state.grenades.splice(i, 1);
+    }
+  }
+  // smoke clouds dissipate
+  for (let i = state.smokes.length - 1; i >= 0; i--) {
+    const c = state.smokes[i]!;
+    c.ttl -= 1;
+    if (c.ttl <= 0) state.smokes.splice(i, 1);
+  }
+
+  // 4. combat — two-phase resolution: all shots roll against PRE-damage state,
+  // then effects apply. Fire within a tick is simultaneous — no id-order
+  // advantage, and mutual kills are possible (as they should be).
+  const shots: ShotEvent[] = [];
   const resolved: Array<{ shooter: Soldier; target: Soldier; hit: boolean }> = [];
   for (const s of state.soldiers) {
     if (!s.alive) {
@@ -100,7 +188,7 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
       continue;
     }
     if (!target) continue;
-    const shot = computeShotPct(state.obstacles, s, target);
+    const shot = computeShotPct(state.obstacles, s, target, state.smokes);
     if (shot.pct <= 0) continue;
     let roll: number;
     [roll, state.rng] = rngInt(state.rng, 100);
@@ -117,22 +205,23 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
         target.alive = false;
         target.tx = null;
         target.ty = null;
+        target.queue = [];
         kill = true;
       }
     }
     if (target.alive) {
       target.suppression = Math.min(100, target.suppression + w.suppression);
     }
-    events.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x, sy: shooter.y, tx: target.x, ty: target.y });
+    shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x, sy: shooter.y, tx: target.x, ty: target.y });
   }
 
-  // 4. suppression decay
+  // 5. suppression decay
   for (const s of state.soldiers) {
     if (s.suppression > 0) s.suppression -= 1;
   }
 
   state.tick += 1;
-  return events;
+  return { shots, booms };
 }
 
 /** Explicit target if valid, else nearest visible enemy in weapon range (lowest id wins ties). */
@@ -141,7 +230,7 @@ function acquireTarget(state: SimState, s: Soldier): Soldier | null {
   if (s.targetId !== null) {
     const t = state.soldiers[s.targetId];
     if (t && t.alive) {
-      if (dist(s.x, s.y, t.x, t.y) <= w.maxRange && losBetween(state.obstacles, s, t).visible) return t;
+      if (dist(s.x, s.y, t.x, t.y) <= w.maxRange && losBetween(state.obstacles, s, t, state.smokes).visible) return t;
       // keep the order; they may come back into view
     } else {
       s.targetId = null;
@@ -155,7 +244,7 @@ function acquireTarget(state: SimState, s: Soldier): Soldier | null {
     if (!t.alive || t.team === s.team) continue;
     const d = dist(s.x, s.y, t.x, t.y);
     if (d > w.maxRange || d >= bestD) continue;
-    if (!losBetween(state.obstacles, s, t).visible) continue;
+    if (!losBetween(state.obstacles, s, t, state.smokes).visible) continue;
     best = t;
     bestD = d;
   }

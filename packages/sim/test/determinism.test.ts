@@ -175,7 +175,7 @@ describe("combat", () => {
     b.hp = 0;
     for (let i = 0; i < 100; i++) {
       const events = tick(s, []);
-      expect(events.length).toBe(0); // no valid targets for a; b never fires
+      expect(events.shots.length).toBe(0); // no valid targets for a; b never fires
     }
     expect(a.alive).toBe(true);
   });
@@ -224,18 +224,18 @@ describe("settle (long-range aim)", () => {
     const sniper = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
     spawnSoldier(s, 1, 10 * MM, 80 * MM, "carbine"); // 70m: beyond dmr settleStart (56m), within maxRange
     let fired = 0;
-    for (let i = 0; i < 44; i++) fired += tick(s, []).length; // settleTicks=45 not yet reached
+    for (let i = 0; i < 59; i++) fired += tick(s, []).shots.length; // settleTicks=60 not yet reached
     expect(fired).toBe(0);
-    for (let i = 0; i < 60; i++) fired += tick(s, []).length;
+    for (let i = 0; i < 80; i++) fired += tick(s, []).shots.length;
     expect(fired).toBeGreaterThan(0);
-    expect(sniper.settle).toBeGreaterThanOrEqual(45);
+    expect(sniper.settle).toBeGreaterThanOrEqual(60);
   });
 
   it("moving resets settle", () => {
     const s = createState(22);
     const sniper = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
     for (let i = 0; i < 100; i++) tick(s, []);
-    expect(sniper.settle).toBeGreaterThan(45);
+    expect(sniper.settle).toBeGreaterThan(60);
     tick(s, [{ type: "move", soldierId: 0, x: 20 * MM, y: 10 * MM, mode: "move" }]);
     tick(s, []);
     expect(sniper.settle).toBeLessThanOrEqual(1);
@@ -246,6 +246,77 @@ describe("settle (long-range aim)", () => {
     spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
     spawnSoldier(s, 1, 10 * MM, 30 * MM, "carbine"); // 20m < settleStart 38m
     const events = tick(s, []);
-    expect(events.length).toBeGreaterThan(0); // fires on tick 0, settle 0
+    expect(events.shots.length).toBeGreaterThan(0); // fires on tick 0, settle 0
+  });
+});
+
+describe("grenades + queueing", () => {
+  it("smoke blocks LOS while active, clears after ttl", () => {
+    const s = createState(31);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    const b = spawnSoldier(s, 1, 10 * MM, 40 * MM, "carbine");
+    // throw smoke halfway between them
+    tick(s, [{ type: "throw", soldierId: 0, kind: "smoke", x: 10 * MM, y: 25 * MM }]);
+    expect(a.smokes).toBe(1);
+    // let it land + deploy
+    for (let i = 0; i < 40; i++) tick(s, []);
+    expect(s.smokes.length).toBe(1);
+    expect(computeShotPct(s.obstacles, a, b, s.smokes).visible).toBe(false);
+    // fast-forward past cloud ttl
+    for (let i = 0; i < 1000; i++) tick(s, []);
+    expect(s.smokes.length).toBe(0);
+    expect(computeShotPct(s.obstacles, a, b, s.smokes).visible).toBe(true);
+  });
+
+  it("frag damages and suppresses by proximity, consumes inventory", () => {
+    const s = createState(32);
+    const thrower = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    const victim = spawnSoldier(s, 1, 10 * MM, 30 * MM, "carbine");
+    victim.stance = "prone";
+    const before = victim.hp;
+    tick(s, [{ type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 29 * MM }]);
+    expect(thrower.frags).toBe(1);
+    for (let i = 0; i < 120; i++) tick(s, []);
+    expect(victim.hp).toBeLessThan(before);
+  });
+
+  it("throws beyond range land clamped at max range", () => {
+    const s = createState(33);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    tick(s, [{ type: "throw", soldierId: 0, kind: "smoke", x: 10 * MM, y: 90 * MM }]);
+    const g = s.grenades[0]!;
+    expect(g.y).toBeLessThanOrEqual(10 * MM + 25000);
+  });
+
+  it("queued waypoints are traversed in order", () => {
+    const s = createState(34);
+    const sol = spawnSoldier(s, 0, 10 * MM, 10 * MM);
+    tick(s, [
+      { type: "move", soldierId: 0, x: 20 * MM, y: 10 * MM, mode: "sprint" },
+      { type: "move", soldierId: 0, x: 20 * MM, y: 20 * MM, queue: true },
+      { type: "move", soldierId: 0, x: 30 * MM, y: 20 * MM, queue: true },
+    ]);
+    expect(sol.queue.length).toBe(2);
+    for (let i = 0; i < 2000; i++) tick(s, []);
+    expect(sol.x).toBe(30 * MM);
+    expect(sol.y).toBe(20 * MM);
+    expect(sol.queue.length).toBe(0);
+    expect(sol.tx).toBeNull();
+  });
+
+  it("grenade + queue state is deterministic", () => {
+    const run = (): number => {
+      const s = createState(35, GREYBOX_MAP);
+      spawnSoldier(s, 0, 30 * MM, 30 * MM, "carbine");
+      spawnSoldier(s, 1, 30 * MM, 60 * MM, "carbine");
+      tick(s, [
+        { type: "throw", soldierId: 0, kind: "smoke", x: 30 * MM, y: 45 * MM },
+        { type: "move", soldierId: 1, x: 60 * MM, y: 60 * MM },
+        { type: "move", soldierId: 1, x: 60 * MM, y: 30 * MM, queue: true },
+      ]);
+      for (let i = 0; i < 500; i++) tick(s, []);
+      return hashState(s);
+    };
+    expect(run()).toBe(run());
   });
 });

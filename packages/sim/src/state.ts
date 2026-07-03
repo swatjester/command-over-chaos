@@ -1,3 +1,5 @@
+import type { Grenade } from "./grenades.js";
+import type { SmokeCloud } from "./los.js";
 import type { MapDef, Obstacle } from "./map.js";
 import { MM } from "./math.js";
 import type { WeaponId } from "./weapons.js";
@@ -34,6 +36,10 @@ export interface Soldier {
   aimId: number | null;
   /** consecutive stationary ticks (capped) — long-range shots need this */
   settle: number;
+  /** queued movement waypoints (shift-click), consumed FIFO */
+  queue: Array<[number, number]>;
+  frags: number;
+  smokes: number;
 }
 
 export interface SimState {
@@ -44,6 +50,9 @@ export interface SimState {
   mapH: number; // mm
   obstacles: Obstacle[]; // static collision + LOS geometry
   soldiers: Soldier[];
+  grenades: Grenade[];
+  smokes: SmokeCloud[];
+  nextGrenadeId: number;
 }
 
 /** speed in mm per tick, by move mode (stance modifiers come later) */
@@ -63,6 +72,9 @@ export function createState(seed: number, map?: MapDef): SimState {
     mapH: map?.h ?? 100 * MM,
     obstacles: map?.obstacles ?? [],
     soldiers: [],
+    grenades: [],
+    smokes: [],
+    nextGrenadeId: 0,
   };
 }
 
@@ -75,6 +87,7 @@ export function spawnSoldier(
     stance: "stand", moveMode: "move",
     hp: 100, suppression: 0, alive: true,
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
+    queue: [], frags: 2, smokes: 2,
   };
   s.soldiers.push(soldier);
   return soldier;

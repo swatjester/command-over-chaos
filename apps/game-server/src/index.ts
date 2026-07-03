@@ -7,7 +7,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import {
   ACTIVE_MAP, createState, hashState, losBetween, MM, spawnSoldier, tick,
-  TICK_MS, TICK_RATE, type Order, type ShotEvent, type Soldier, type WeaponId,
+  TICK_MS, TICK_RATE, type Boom, type Order, type ShotEvent, type Soldier, type WeaponId,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
 import { DEFAULT_SERVER_PORT } from "@coc/shared";
@@ -17,7 +17,8 @@ const FIRETEAM_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
 
 const state = createState(Date.now() >>> 0, ACTIVE_MAP);
 const pendingOrders: Order[] = [];
-let pendingEvents: ShotEvent[] = [];
+let pendingShots: ShotEvent[] = [];
+let pendingBooms: Boom[] = [];
 
 interface Player {
   id: string;
@@ -86,7 +87,9 @@ setInterval(() => {
   while (acc >= TICK_MS) {
     acc -= TICK_MS;
     const orders = pendingOrders.splice(0);
-    pendingEvents.push(...tick(state, orders));
+    const ev = tick(state, orders);
+    pendingShots.push(...ev.shots);
+    pendingBooms.push(...ev.booms);
     if (state.tick % 3 === 0) broadcast(); // snapshots at 10Hz for M0/M1
   }
 }, 4);
@@ -96,18 +99,22 @@ function visibleTo(team: 0 | 1): Soldier[] {
   return state.soldiers.filter((s) => {
     if (s.team === team) return true;
     return state.soldiers.some(
-      (a) => a.team === team && a.alive && losBetween(state.obstacles, a, s).visible,
+      (a) => a.team === team && a.alive && losBetween(state.obstacles, a, s, state.smokes).visible,
     );
   });
 }
 
 function broadcast(): void {
-  const events = pendingEvents;
-  pendingEvents = [];
+  const shots = pendingShots;
+  const booms = pendingBooms;
+  pendingShots = [];
+  pendingBooms = [];
   const hash = hashState(state);
+  const grenades = state.grenades;
+  const smokes = state.smokes;
   const byTeam: Record<0 | 1, string> = {
-    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), events } satisfies ServerMsg),
-    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), events } satisfies ServerMsg),
+    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes } satisfies ServerMsg),
+    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes } satisfies ServerMsg),
   };
   for (const p of players.values()) {
     if (p.ws.readyState === WebSocket.OPEN) p.ws.send(byTeam[p.team]);
