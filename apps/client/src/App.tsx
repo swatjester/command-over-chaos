@@ -106,6 +106,11 @@ export function App(): JSX.Element {
         conn.sendOrders(sel.map((s) => ({ type: "mode" as const, soldierId: s.id, mode: allSprint ? "move" as const : "sprint" as const })));
         return;
       }
+      if (key === "t") { // hold fire <-> fire at will
+        const allHold = sel.every((x) => x.holdFire);
+        conn.sendOrders(sel.map((x) => ({ type: "firemode" as const, soldierId: x.id, hold: !allHold })));
+        return;
+      }
       if (key === "q") { setArmed((a) => (a === "frag" ? null : "frag")); return; }
       if (key === "e") { setArmed((a) => (a === "smoke" ? null : "smoke")); return; }
       const stance: Stance | null =
@@ -225,7 +230,10 @@ export function App(): JSX.Element {
             }}
           >
             <div style={{ fontSize: 11, opacity: 0.75, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ opacity: 0.8 }}>[{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}</span>
+              <span style={{ opacity: 0.8 }}>
+                [{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}
+                {s.alive && s.holdFire && <span style={{ color: "#e6b45a", fontWeight: 700 }}> HOLD</span>}
+              </span>
               {s.alive ? <StanceIcon stance={s.stance} /> : <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>}
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
@@ -253,7 +261,7 @@ export function App(): JSX.Element {
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
         left-click: select · right-click: move / fire · shift+right-click: queue waypoints<br />
-        `: select squad · 1–4: soldier · F: sprint · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
+        `: select squad · 1–4: soldier · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
         WASD: pan · wheel: zoom · middle-drag: rotate
       </div>
     </div>
@@ -282,6 +290,9 @@ function AimLine({ s, byId, smokes }: {
   }
   if (s.targetId !== null) {
     return <div style={{ fontSize: 10, marginTop: 3, height: 14, color: "#e6b45a" }}>target held · no LOS</div>;
+  }
+  if (s.holdFire) {
+    return <div style={{ fontSize: 10, marginTop: 3, height: 14, color: "#e6b45a" }}>holding fire</div>;
   }
   return <div style={{ fontSize: 10, marginTop: 3, height: 14, opacity: 0.35 }}>no target</div>;
 }

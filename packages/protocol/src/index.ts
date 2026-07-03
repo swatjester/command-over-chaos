@@ -39,6 +39,11 @@ export const OrderSchema = z.discriminatedUnion("type", [
     y: z.number().int(),
   }),
   z.object({
+    type: z.literal("firemode"),
+    soldierId: z.number().int().nonnegative(),
+    hold: z.boolean(),
+  }),
+  z.object({
     type: z.literal("halt"),
     soldierId: z.number().int().nonnegative(),
   }),
@@ -71,6 +76,7 @@ export const SoldierSnapshotSchema = z.object({
   settle: z.number().int(),
   frags: z.number().int(),
   smokes: z.number().int(),
+  holdFire: z.boolean(),
   queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 

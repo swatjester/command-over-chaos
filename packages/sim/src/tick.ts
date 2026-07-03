@@ -85,6 +85,9 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
         if (o.kind === "frag") s.frags -= 1; else s.smokes -= 1;
         break;
       }
+      case "firemode":
+        s.holdFire = o.hold;
+        break;
       case "halt":
         s.tx = null;
         s.ty = null;
@@ -237,6 +240,7 @@ function acquireTarget(state: SimState, s: Soldier): Soldier | null {
     }
     if (s.targetId !== null) return null; // holding for the ordered target only
   }
+  if (s.holdFire) return null; // hold fire: only explicit target orders engage
   // fire at will
   let best: Soldier | null = null;
   let bestD = Infinity;

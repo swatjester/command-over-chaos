@@ -320,3 +320,32 @@ describe("grenades + queueing", () => {
     expect(run()).toBe(run());
   });
 });
+
+describe("fire modes", () => {
+  it("hold fire suppresses auto-engagement; explicit target overrides", () => {
+    const s = createState(41);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    spawnSoldier(s, 1, 10 * MM, 30 * MM, "carbine");
+    // both hold, so nobody dies while we verify silence
+    tick(s, [
+      { type: "firemode", soldierId: 0, hold: true },
+      { type: "firemode", soldierId: 1, hold: true },
+    ]);
+    let aShots = 0;
+    for (let i = 0; i < 60; i++) {
+      const ev = tick(s, []);
+      aShots += ev.shots.length; // neither side should fire
+    }
+    expect(a.holdFire).toBe(true);
+    expect(aShots).toBe(0);
+    // explicit fire order punches through hold fire
+    tick(s, [{ type: "target", soldierId: 0, targetId: 1 }]);
+    for (let i = 0; i < 60 && aShots === 0; i++) {
+      aShots += tick(s, []).shots.filter((e) => e.shooter === 0).length;
+    }
+    expect(aShots).toBeGreaterThan(0);
+    // releasing hold resumes fire at will
+    tick(s, [{ type: "target", soldierId: 0, targetId: null }, { type: "firemode", soldierId: 0, hold: false }]);
+    expect(a.holdFire).toBe(false);
+  });
+});
