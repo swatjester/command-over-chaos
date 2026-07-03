@@ -6,9 +6,8 @@
   "packageManager": "pnpm@9.15.0",
   "engines": { "node": ">=22" },
   "scripts": {
-    "dev": "pnpm --filter @coc/game-server dev & pnpm --filter @coc/client dev",
+    "dev:server": "pnpm --filter @coc/game-server dev",
+    "dev:client": "pnpm --filter @coc/client dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
-  }
-}
+    "te

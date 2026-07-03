@@ -30,18 +30,18 @@ Turborepo will be added when the build graph warrants it.
 
 ```bash
 pnpm install
-pnpm build          # build all packages
+pnpm build          # REQUIRED once after install: apps resolve workspace
+                    # packages via their compiled dist/. Re-run after pulling
+                    # changes to packages/ (tsx/vite watch app code only).
 pnpm test           # includes sim determinism tests
-pnpm --filter @coc/game-server dev   # ws server on :8787
-pnpm --filter @coc/client dev        # Vite on :5173
+
+# then, in two terminals:
+pnpm dev:server     # ws match server on :8787
+pnpm dev:client     # Vite on :5173
 ```
 
 Open the client, and it connects to the local server; click ground to move soldiers.
 
 ## Core invariant
 
-`@coc/sim` is **deterministic**: integer-scaled math, seeded RNG, fixed 30Hz tick, zero dependence on wall clock or float accumulation. Same seed + same input log ⇒ identical state hash on any machine. Replays, anti-cheat verification, and desync detection all depend on this — CI enforces it (`packages/sim/test/determinism.test.ts`).
-
-## Licensing
-
-Proprietary — all rights reserved (for now). Third-party assets tracked in [ASSETS.md](./ASSETS.md).
+`@coc/sim` is **deterministic**: integer-scaled math, seeded RNG, fixed 30Hz tick, zero dependence on wall clock or float accumulation. Same seed + same input log ⇒ identical state hash on any machine. Replays, anti-cheat verification, and desync detection all depend on 
