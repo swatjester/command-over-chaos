@@ -28,6 +28,7 @@ export interface SceneApi {
   onSoldierClick(cb: (id: number) => void): void;
   onAttack(cb: (targetId: number) => void): void;
   onHover(cb: (targetId: number | null, screenX: number, screenY: number) => void): void;
+  onMarquee(cb: (ids: number[]) => void): void;
   setCursor(style: string | null): void;
   dispose(): void;
 }
@@ -336,7 +337,35 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   let soldierCb: ((id: number) => void) | null = null;
   let attackCb: ((id: number) => void) | null = null;
   let hoverCb: ((id: number | null, sx: number, sy: number) => void) | null = null;
+  let marqueeCb: ((ids: number[]) => void) | null = null;
   let forcedCursor: string | null = null;
+
+  // marquee (click-drag box select) state + overlay
+  let marqueeStart: [number, number] | null = null;
+  let marqueeActive = false;
+  const marqueeDiv = document.createElement("div");
+  marqueeDiv.style.cssText =
+    "position:fixed;border:1px solid #4da3ff;background:#4da3ff22;pointer-events:none;display:none;z-index:5;";
+  document.body.appendChild(marqueeDiv);
+
+  function marqueeRect(ex: number, ey: number): [number, number, number, number] {
+    const [sx, sy] = marqueeStart!;
+    return [Math.min(sx, ex), Math.min(sy, ey), Math.max(sx, ex), Math.max(sy, ey)];
+  }
+
+  function soldiersInRect(x1: number, y1: number, x2: number, y2: number): number[] {
+    const rect = canvas.getBoundingClientRect();
+    const ids: number[] = [];
+    const v = new THREE.Vector3();
+    for (const [id, snap] of lastSoldiers) {
+      if (!mySet.has(id) || !snap.alive) continue;
+      v.set(snap.x / 1000, 0.8, snap.y / 1000).project(camera);
+      const px = rect.left + ((v.x + 1) / 2) * rect.width;
+      const py = rect.top + ((1 - v.y) / 2) * rect.height;
+      if (px >= x1 && px <= x2 && py >= y1 && py <= y2) ids.push(id);
+    }
+    return ids;
+  }
 
   function ndcFrom(e: PointerEvent): THREE.Vector2 {
     const rect = canvas.getBoundingClientRect();
@@ -366,12 +395,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   function pick(e: PointerEvent): void {
     const id = raycastSoldier(e);
     if (e.button === 0) {
+      if (forcedCursor) { // armed (grenade targeting): click = throw
+        const g = raycastGround(e);
+        if (g && groundLeftCb) groundLeftCb(g[0], g[1]);
+        return;
+      }
       if (id !== null && mySet.has(id) && lastSoldiers.get(id)?.alive) {
         soldierCb?.(id);
         return;
       }
-      const g = raycastGround(e);
-      if (g && groundLeftCb) groundLeftCb(g[0], g[1]);
+      // empty ground: begin potential marquee drag
+      marqueeStart = [e.clientX, e.clientY];
+      canvas.setPointerCapture(e.pointerId);
       return;
     }
     if (e.button === 2) {
@@ -404,6 +439,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       layoutCamera();
       return;
     }
+    if (marqueeStart) {
+      const [x1, y1, x2, y2] = marqueeRect(e.clientX, e.clientY);
+      if (marqueeActive || Math.abs(x2 - x1) + Math.abs(y2 - y1) > 6) {
+        marqueeActive = true;
+        marqueeDiv.style.display = "block";
+        marqueeDiv.style.left = `${x1}px`;
+        marqueeDiv.style.top = `${y1}px`;
+        marqueeDiv.style.width = `${x2 - x1}px`;
+        marqueeDiv.style.height = `${y2 - y1}px`;
+      }
+      return;
+    }
     const id = raycastSoldier(e);
     const hostile = id !== null && !mySet.has(id) && lastSoldiers.get(id)?.alive;
     canvas.style.cursor = forcedCursor ?? (hostile ? "crosshair" : "default");
@@ -411,6 +458,15 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   });
   const endRotate = (e: PointerEvent): void => {
     if (e.button === 1) rotating = false;
+    if (e.button === 0 && marqueeStart) {
+      if (marqueeActive) {
+        const ids = soldiersInRect(...marqueeRect(e.clientX, e.clientY));
+        if (ids.length > 0) marqueeCb?.(ids);
+      }
+      marqueeStart = null;
+      marqueeActive = false;
+      marqueeDiv.style.display = "none";
+    }
   };
   canvas.addEventListener("pointerup", endRotate);
   canvas.addEventListener("pointercancel", endRotate);
@@ -512,7 +568,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     onSoldierClick: (cb) => { soldierCb = cb; },
     onAttack: (cb) => { attackCb = cb; },
     onHover: (cb) => { hoverCb = cb; },
+    onMarquee: (cb) => { marqueeCb = cb; },
     setCursor: (style) => { forcedCursor = style; },
-    dispose: () => { disposed = true; renderer.dispose(); },
+    dispose: () => { disposed = true; marqueeDiv.remove(); renderer.dispose(); },
   };
 }

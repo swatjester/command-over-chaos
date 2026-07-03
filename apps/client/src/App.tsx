@@ -79,6 +79,10 @@ export function App(): JSX.Element {
         conn.sendOrders(sel.map((s) => ({ type: "target" as const, soldierId: s.id, targetId })));
       });
       scene.onHover((id, x, y) => setHover(id === null ? null : { id, x, y }));
+      scene.onMarquee((ids) => {
+        setArmed(null);
+        setSelected(ids);
+      });
     });
 
     const onKey = (e: KeyboardEvent): void => {
@@ -260,7 +264,7 @@ export function App(): JSX.Element {
         position: "absolute", bottom: 12, left: 12, fontSize: 11, color: "#8b98a5",
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
-        left-click: select · right-click: move / fire · shift+right-click: queue waypoints<br />
+        left-click: select · drag: box select · right-click: move / fire · shift+right-click: queue<br />
         `: select squad · 1–4: soldier · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
         WASD: pan · wheel: zoom · middle-drag: rotate
       </div>

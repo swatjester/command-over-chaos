@@ -5,8 +5,9 @@ import type { Stance } from "./state.js";
 export const WALL_HEIGHT = 1200;
 /** A target within this distance (mm) of intervening low cover gets the cover bonus. */
 export const COVER_NEAR = 2500;
-/** Corner peek lean distance (mm) — soldiers see around corners they hug. */
-export const PEEK_DIST = 650;
+/** Corner peek lean distance (mm) — soldiers see around corners they hug.
+ *  Also the exposure width: stand within this of a frame and you can be seen. */
+export const PEEK_DIST = 950;
 
 export interface SmokeCloud { id: number; x: number; y: number; r: number; ttl: number; }
 
