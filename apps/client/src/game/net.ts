@@ -7,6 +7,7 @@ import {
   ACTIVE_MAP, createState, MM, spawnSoldier, tick, TICK_MS,
   type Order, type SimState, type WeaponId,
 } from "@coc/sim";
+import { ARCHETYPE_WEAPONS, type PlayableArchetype } from "@coc/shared";
 import {
   ServerMsgSchema, type Boom, type ClientMsg, type GrenadeSnapshot,
   type ShotEvent, type SmokeSnapshot, type SoldierSnapshot,
@@ -30,15 +31,26 @@ export interface Connection {
   close(): void;
 }
 
-export function connect(url = "ws://localhost:8787"): Promise<Connection> {
+function sessionToken(): string {
+  let t = localStorage.getItem("coc-token");
+  if (!t) {
+    t = crypto.randomUUID();
+    localStorage.setItem("coc-token", t);
+  }
+  return t;
+}
+
+export function connect(
+  archetype: PlayableArchetype = "infantry", url = "ws://localhost:8787",
+): Promise<Connection> {
   return new Promise((resolve) => {
     let snapshotCb: SnapshotCb | null = null;
     const ws = new WebSocket(url);
-    const timeout = setTimeout(() => { ws.close(); resolve(offline()); }, 1500);
+    const timeout = setTimeout(() => { ws.close(); resolve(offline(archetype)); }, 1500);
 
-    ws.onerror = () => { clearTimeout(timeout); resolve(offline()); };
+    ws.onerror = () => { clearTimeout(timeout); resolve(offline(archetype)); };
     ws.onopen = () => {
-      ws.send(JSON.stringify({ t: "join", name: "player" } satisfies ClientMsg));
+      ws.send(JSON.stringify({ t: "join", name: "player", token: sessionToken(), archetype } satisfies ClientMsg));
     };
     ws.onmessage = (e) => {
       const parsed = ServerMsgSchema.safeParse(JSON.parse(e.data as string));
@@ -62,13 +74,13 @@ export function connect(url = "ws://localhost:8787"): Promise<Connection> {
   });
 }
 
-const OFFLINE_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
-
-function offline(): Connection {
+function offline(archetype: PlayableArchetype): Connection {
   const state: SimState = createState(20260702, ACTIVE_MAP);
+  const mine = ARCHETYPE_WEAPONS[archetype] as unknown as WeaponId[];
+  const theirs = ARCHETYPE_WEAPONS.rangers as unknown as WeaponId[];
   // offline demo: two fireteams face off across the central courtyard
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, OFFLINE_WEAPONS[i]);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, OFFLINE_WEAPONS[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, mine[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, theirs[i]);
   let pending: Order[] = [];
   let snapshotCb: SnapshotCb | null = null;
 

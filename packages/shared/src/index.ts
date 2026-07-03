@@ -23,3 +23,11 @@ export interface FireteamArchetype {
 }
 
 export const FIRETEAMS: FireteamArchetype[] = fireteamsJson.archetypes;
+
+/** M2 archetype proxies: preset weapon kits until abilities/stats land (M3). */
+export type PlayableArchetype = "infantry" | "rangers" | "recon";
+export const ARCHETYPE_WEAPONS: Record<PlayableArchetype, [string, string, string, string]> = {
+  infantry: ["carbine", "lmg", "carbine", "carbine"],
+  rangers: ["carbine", "smg", "dmr", "smg"],
+  recon: ["carbine", "dmr", "dmr", "smg"],
+};

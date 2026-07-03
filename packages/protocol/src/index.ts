@@ -39,6 +39,11 @@ export const OrderSchema = z.discriminatedUnion("type", [
     y: z.number().int(),
   }),
   z.object({
+    type: z.literal("aid"),
+    soldierId: z.number().int().nonnegative(),
+    targetId: z.number().int().nonnegative(),
+  }),
+  z.object({
     type: z.literal("firemode"),
     soldierId: z.number().int().nonnegative(),
     hold: z.boolean(),
@@ -50,7 +55,12 @@ export const OrderSchema = z.discriminatedUnion("type", [
 ]);
 
 export const ClientMsgSchema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("join"), name: z.string().min(1).max(24) }),
+  z.object({
+    t: z.literal("join"),
+    name: z.string().min(1).max(24),
+    token: z.string().max(64).optional(),
+    archetype: z.enum(["infantry", "rangers", "recon"]).optional(),
+  }),
   z.object({ t: z.literal("orders"), orders: z.array(OrderSchema).max(32) }),
   z.object({ t: z.literal("ping"), n: z.number().int() }),
 ]);
@@ -79,6 +89,10 @@ export const SoldierSnapshotSchema = z.object({
   holdFire: z.boolean(),
   leanX: z.number().int(),
   leanY: z.number().int(),
+  down: z.boolean(),
+  bleed: z.number().int(),
+  aidId: z.number().int().nullable(),
+  aidProgress: z.number().int(),
   queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 

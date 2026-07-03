@@ -27,6 +27,7 @@ export interface SceneApi {
   onGroundLeftClick(cb: (xMm: number, yMm: number) => void): void;
   onSoldierClick(cb: (id: number) => void): void;
   onAttack(cb: (targetId: number) => void): void;
+  onAid(cb: (allyId: number) => void): void;
   onHover(cb: (targetId: number | null, screenX: number, screenY: number) => void): void;
   onMarquee(cb: (ids: number[]) => void): void;
   setCursor(style: string | null): void;
@@ -199,6 +200,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
         mat.color.multiplyScalar(0.25);
         mat.emissiveIntensity = 0;
         g.scale.y = 0.18;
+      } else if (s.alive && s.down) {
+        g.scale.y = 0.28; // downed: flat but not gone — revivable
       } else if (s.alive) {
         g.scale.y = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
       }
@@ -336,6 +339,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   let groundLeftCb: ((x: number, y: number) => void) | null = null;
   let soldierCb: ((id: number) => void) | null = null;
   let attackCb: ((id: number) => void) | null = null;
+  let aidCb: ((id: number) => void) | null = null;
   let hoverCb: ((id: number | null, sx: number, sy: number) => void) | null = null;
   let marqueeCb: ((ids: number[]) => void) | null = null;
   let forcedCursor: string | null = null;
@@ -410,8 +414,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       return;
     }
     if (e.button === 2) {
-      if (id !== null && !mySet.has(id) && lastSoldiers.get(id)?.alive) {
+      const snap = id !== null ? lastSoldiers.get(id) : undefined;
+      if (id !== null && snap?.alive && !mySet.has(id) && !snap.down) {
         attackCb?.(id);
+        return;
+      }
+      if (id !== null && snap?.alive && snap.down && mySet.has(id)) {
+        aidCb?.(id); // right-click your own downed soldier = revive order
         return;
       }
       const g = raycastGround(e);
@@ -452,7 +461,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       return;
     }
     const id = raycastSoldier(e);
-    const hostile = id !== null && !mySet.has(id) && lastSoldiers.get(id)?.alive;
+    const hsnap = id !== null ? lastSoldiers.get(id) : undefined;
+    const hostile = id !== null && !mySet.has(id) && hsnap?.alive && !hsnap.down;
     canvas.style.cursor = forcedCursor ?? (hostile ? "crosshair" : "default");
     hoverCb?.(hostile ? id : null, e.clientX, e.clientY);
   });
@@ -567,6 +577,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     onGroundLeftClick: (cb) => { groundLeftCb = cb; },
     onSoldierClick: (cb) => { soldierCb = cb; },
     onAttack: (cb) => { attackCb = cb; },
+    onAid: (cb) => { aidCb = cb; },
     onHover: (cb) => { hoverCb = cb; },
     onMarquee: (cb) => { marqueeCb = cb; },
     setCursor: (style) => { forcedCursor = style; },

@@ -35,6 +35,8 @@ export function hashState(state: SimState): number {
     mix(s.frags); mix(s.smokes);
     mix(s.holdFire ? 1 : 0);
     mix(s.leanX); mix(s.leanY);
+    mix(s.down ? 1 : 0); mix(s.bleed);
+    mix(s.aidId ?? -1); mix(s.aidProgress);
     mix(s.queue.length);
     for (const [qx, qy] of s.queue) { mix(qx); mix(qy); }
   }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
 import { ACTIVE_MAP, computeShotPct, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
-import { GAME_NAME } from "@coc/shared";
+import { ARCHETYPE_WEAPONS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
 import { connect, type Connection, type SnapshotData } from "./game/net.js";
 import { createScene, type SceneApi } from "./game/scene.js";
 
@@ -13,6 +13,9 @@ export function App(): JSX.Element {
   const sceneRef = useRef<SceneApi | null>(null);
   const [snap, setSnap] = useState<SnapshotData | null>(null);
   const [mode, setMode] = useState<"connecting" | "online" | "offline">("connecting");
+  const [archetype, setArchetype] = useState<PlayableArchetype | null>(
+    (localStorage.getItem("coc-archetype") as PlayableArchetype | null) ?? null,
+  );
   const [myIds, setMyIds] = useState<number[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [armed, setArmed] = useState<GrenadeKind | null>(null);
@@ -25,6 +28,7 @@ export function App(): JSX.Element {
   snapRef.current = snap;
 
   useEffect(() => {
+    if (!archetype) return;
     const scene = createScene(canvasRef.current!);
     sceneRef.current = scene;
     let alive = true;
@@ -33,10 +37,10 @@ export function App(): JSX.Element {
       const byId = new Map((snapRef.current?.soldiers ?? []).map((s) => [s.id, s]));
       return selectedRef.current
         .map((id) => byId.get(id))
-        .filter((s): s is SoldierSnapshot => !!s && s.alive);
+        .filter((s): s is SoldierSnapshot => !!s && s.alive && !s.down);
     };
 
-    void connect().then((conn) => {
+    void connect(archetype).then((conn) => {
       if (!alive) { conn.close(); return; }
       connRef.current = conn;
       setMode(conn.mode);
@@ -82,6 +86,11 @@ export function App(): JSX.Element {
       scene.onMarquee((ids) => {
         setArmed(null);
         setSelected(ids);
+      });
+      scene.onAid((allyId) => {
+        const sel = aliveSelected().filter((x) => x.id !== allyId && !x.down);
+        const medic = sel[0];
+        if (medic) conn.sendOrders([{ type: "aid", soldierId: medic.id, targetId: allyId }]);
       });
     });
 
@@ -132,7 +141,7 @@ export function App(): JSX.Element {
       connRef.current?.close();
       scene.dispose();
     };
-  }, []);
+  }, [archetype]);
 
   useEffect(() => {
     sceneRef.current?.setCursor(armed ? "cell" : null);
@@ -146,6 +155,39 @@ export function App(): JSX.Element {
     .map((id) => byId.get(id))
     .filter((s): s is SoldierSnapshot => !!s && s.alive);
   const hoverTarget = hover ? byId.get(hover.id) : undefined;
+
+  if (!archetype) {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center", height: "100%",
+        fontFamily: "system-ui, sans-serif", color: "#dfe7ee", flexDirection: "column", gap: 24,
+      }}>
+        <div style={{ fontWeight: 800, letterSpacing: 3, fontSize: 22 }}>{GAME_NAME.toUpperCase()}</div>
+        <div style={{ opacity: 0.6, fontSize: 13 }}>Select your fireteam</div>
+        <div style={{ display: "flex", gap: 14 }}>
+          {(Object.keys(ARCHETYPE_WEAPONS) as PlayableArchetype[]).map((a) => (
+            <button
+              key={a}
+              onClick={() => {
+                localStorage.setItem("coc-archetype", a);
+                setArchetype(a);
+              }}
+              style={{
+                width: 180, padding: "16px 14px", borderRadius: 10, cursor: "pointer",
+                background: "#141a21", border: "1px solid #2a3138", color: "#dfe7ee", textAlign: "left",
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8, textTransform: "capitalize" }}>{a}</div>
+              <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.8 }}>
+                {ARCHETYPE_WEAPONS[a].map((w, i) => <div key={i}>{w.toUpperCase()}</div>)}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div style={{ opacity: 0.4, fontSize: 11 }}>abilities & stats arrive with the full archetype system (M3)</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -238,10 +280,14 @@ export function App(): JSX.Element {
                 [{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}
                 {s.alive && s.holdFire && <span style={{ color: "#e6b45a", fontWeight: 700 }}> HOLD</span>}
               </span>
-              {s.alive ? <StanceIcon stance={s.stance} /> : <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>}
+              {!s.alive ? <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>
+                : s.down ? <span style={{ color: "#e6b45a", fontWeight: 700 }}>DOWN</span>
+                : <StanceIcon stance={s.stance} />}
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
-              HP <Bar value={s.hp} color="#5fd68a" />
+              {s.down
+                ? <>BLD <Bar value={Math.round((s.bleed / 1800) * 100)} color="#e6b45a" /></>
+                : <>HP <Bar value={s.hp} color="#5fd68a" /></>}
             </div>
             <div style={{ fontSize: 12 }}>
               SUP <Bar value={s.suppression} color="#e66a5a" />
@@ -249,9 +295,10 @@ export function App(): JSX.Element {
             <AimLine s={s} byId={byId} smokes={snap?.smokes ?? []} />
             <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2, display: "flex", justifyContent: "space-between" }}>
               <span>
-                {s.alive
-                  ? `${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`
-                  : "—"}
+                {!s.alive ? "—"
+                  : s.down ? "bleeding out — right-click with an ally to revive"
+                  : s.aidId !== null ? `aiding #${s.aidId} (${Math.round((s.aidProgress / 90) * 100)}%)`
+                  : `${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`}
               </span>
               {s.alive && <span style={{ opacity: 0.9 }}>Q×{s.frags} E×{s.smokes}</span>}
             </div>
@@ -264,7 +311,7 @@ export function App(): JSX.Element {
         position: "absolute", bottom: 12, left: 12, fontSize: 11, color: "#8b98a5",
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
-        left-click: select · drag: box select · right-click: move / fire · shift+right-click: queue<br />
+        left-click: select · drag: box select · right-click: move / fire / revive ally · shift+right-click: queue<br />
         `: select squad · 1–4: soldier · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
         WASD: pan · wheel: zoom · middle-drag: rotate
       </div>

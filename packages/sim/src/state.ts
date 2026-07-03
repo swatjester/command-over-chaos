@@ -9,6 +9,13 @@ export const TICK_MS = 1000 / TICK_RATE;
 
 /** Suppression above this pins a soldier: forced crawl-speed movement. */
 export const PIN_THRESHOLD = 70;
+/** Downed soldiers bleed out after this many ticks (60s) without aid. */
+export const BLEED_TICKS = 1800;
+/** Adjacent-ally revive channel length (3s) and reach (mm). */
+export const AID_TICKS = 90;
+export const AID_RANGE = 1600;
+/** HP restored by a field revive. */
+export const REVIVE_HP = 25;
 
 export type Stance = "stand" | "crouch" | "prone";
 export type MoveMode = "sprint" | "move" | "sneak" | "crawl";
@@ -45,6 +52,14 @@ export interface Soldier {
   /** current corner-peek lean offset (mm) — visual + shot origin */
   leanX: number;
   leanY: number;
+  /** downed: incapacitated, bleeding out, revivable */
+  down: boolean;
+  /** ticks until a downed soldier dies (60s) */
+  bleed: number;
+  /** ally this soldier is trying to revive */
+  aidId: number | null;
+  /** aid channel progress (ticks, revive at AID_TICKS) */
+  aidProgress: number;
 }
 
 export interface SimState {
@@ -93,6 +108,7 @@ export function spawnSoldier(
     hp: 100, suppression: 0, alive: true,
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
     queue: [], frags: 2, smokes: 2, holdFire: false, leanX: 0, leanY: 0,
+    down: false, bleed: 0, aidId: null, aidProgress: 0,
   };
   s.soldiers.push(soldier);
   return soldier;

@@ -11,3 +11,4 @@ coverage/
 packages/*/src/*.js
 packages/*/src/*.d.ts
 packages/*/src/*.js.map
+replays/

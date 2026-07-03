@@ -80,14 +80,18 @@ describe("sim determinism", () => {
 });
 
 describe("collision", () => {
-  it("soldiers cannot pass through or end up inside walls", () => {
+  it("soldiers never overlap walls — and now route around them (A*)", () => {
     const s = createState(5, GREYBOX_MAP);
     spawnSoldier(s, 0, 50 * MM, 38 * MM); // north of the building's north wall
     tick(s, [{ type: "move", soldierId: 0, x: 50 * MM, y: 50 * MM, mode: "sprint" }]);
-    for (let i = 0; i < 600; i++) tick(s, []);
     const sol = s.soldiers[0]!;
-    expect(blocked(s.obstacles, sol.x, sol.y)).toBe(false);
-    expect(sol.y).toBeLessThan(44 * MM); // never crossed the wall line
+    for (let i = 0; i < 2000; i++) {
+      tick(s, []);
+      expect(blocked(s.obstacles, sol.x, sol.y)).toBe(false); // never clips geometry
+    }
+    // pathfinding took them around through the doorway to the interior goal
+    expect(sol.x).toBe(50 * MM);
+    expect(sol.y).toBe(50 * MM);
   });
 
   it("target inside an obstacle stops cleanly (no wedge loop)", () => {
@@ -297,7 +301,7 @@ describe("grenades + queueing", () => {
       { type: "move", soldierId: 0, x: 20 * MM, y: 20 * MM, queue: true },
       { type: "move", soldierId: 0, x: 30 * MM, y: 20 * MM, queue: true },
     ]);
-    expect(sol.queue.length).toBe(2);
+    expect(sol.queue.length).toBeGreaterThanOrEqual(2); // pathfound legs appended
     for (let i = 0; i < 2000; i++) tick(s, []);
     expect(sol.x).toBe(30 * MM);
     expect(sol.y).toBe(20 * MM);
@@ -480,5 +484,88 @@ describe("mutual lean (facing doorways)", () => {
     expect(a.aimId).toBeNull();
     expect(a.leanX).toBe(0);
     expect(a.leanY).toBe(0);
+  });
+});
+
+describe("pathfinding", () => {
+  it("routes around the farmstead maison and is deterministic", () => {
+    const run = (): number => {
+      const s = createState(71, FARMSTEAD_MAP);
+      spawnSoldier(s, 0, 75 * MM, 15 * MM); // north of maison
+      tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]); // south of it
+      for (let i = 0; i < 3000; i++) tick(s, []);
+      return hashState(s);
+    };
+    const s = createState(71, FARMSTEAD_MAP);
+    const sol = spawnSoldier(s, 0, 75 * MM, 15 * MM);
+    tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]);
+    for (let i = 0; i < 3000; i++) tick(s, []);
+    expect(sol.x).toBe(75 * MM);
+    expect(sol.y).toBe(40 * MM); // arrived (used to wedge on the north wall)
+    expect(run()).toBe(run());
+  });
+
+  it("unreachable targets settle at nearest reachable cell", () => {
+    const s = createState(72, FARMSTEAD_MAP);
+    const sol = spawnSoldier(s, 0, 75 * MM, 60 * MM);
+    // the well is solid: order INTO it
+    tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 75 * MM }]);
+    for (let i = 0; i < 2000; i++) tick(s, []);
+    expect(blocked(s.obstacles, sol.x, sol.y)).toBe(false);
+    expect(sol.tx).toBeNull(); // finished, not wedged forever
+  });
+});
+
+describe("down / bleed-out / revive", () => {
+  function shootDown(s: ReturnType<typeof createState>): void {
+    for (let i = 0; i < 3000 && !s.soldiers[0]!.down; i++) tick(s, []);
+  }
+
+  it("small-arms lethal hits down soldiers; bleed-out kills without aid", () => {
+    const s = createState(81);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    spawnSoldier(s, 1, 10 * MM, 25 * MM, "lmg");
+    tick(s, [{ type: "firemode", soldierId: 0, hold: true }]); // a doesn't fight back
+    shootDown(s);
+    expect(a.down).toBe(true);
+    expect(a.alive).toBe(true);
+    const bleedAtDown = a.bleed;
+    expect(bleedAtDown).toBeGreaterThan(0);
+    for (let i = 0; i < bleedAtDown + 5; i++) tick(s, []);
+    expect(a.alive).toBe(false); // bled out
+  });
+
+  it("adjacent ally revives a downed soldier at 25hp", () => {
+    const s = createState(82);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    const medic = spawnSoldier(s, 0, 30 * MM, 10 * MM, "carbine");
+    spawnSoldier(s, 1, 10 * MM, 25 * MM, "lmg");
+    tick(s, [
+      { type: "firemode", soldierId: 0, hold: true },
+      { type: "firemode", soldierId: 1, hold: true },
+    ]);
+    shootDown(s);
+    expect(a.down).toBe(true);
+    // enemy ceases fire so the medic can work (otherwise he just downs the medic too)
+    tick(s, [
+      { type: "firemode", soldierId: 2, hold: true },
+      { type: "aid", soldierId: 1, targetId: 0 },
+    ]);
+    for (let i = 0; i < 1200 && a.down; i++) tick(s, []);
+    expect(a.down).toBe(false);
+    expect(a.alive).toBe(true);
+    expect(a.hp).toBe(25);
+    expect(medic.aidId).toBeNull();
+  });
+
+  it("downed soldiers are not auto-targeted", () => {
+    const s = createState(83);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    a.down = true;
+    a.bleed = 1800;
+    a.hp = 0;
+    spawnSoldier(s, 1, 10 * MM, 25 * MM, "carbine");
+    const ev = tick(s, []);
+    expect(ev.shots.length).toBe(0);
   });
 });

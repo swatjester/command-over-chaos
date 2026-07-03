@@ -6,6 +6,7 @@ export * from "./grenades.js";
 export * from "./state.js";
 export * from "./orders.js";
 export * from "./los.js";
+export * from "./path.js";
 export * from "./combat.js";
 export * from "./tick.js";
 export * from "./hash.js";

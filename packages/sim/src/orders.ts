@@ -7,6 +7,7 @@ export type Order =
   | { type: "stance"; soldierId: number; stance: Stance }
   | { type: "target"; soldierId: number; targetId: number | null }
   | { type: "throw"; soldierId: number; kind: GrenadeKind; x: number; y: number }
+  | { type: "aid"; soldierId: number; targetId: number }
   | { type: "firemode"; soldierId: number; hold: boolean }
   | { type: "halt"; soldierId: number };
 
