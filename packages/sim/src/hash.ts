@@ -30,6 +30,7 @@ export function hashState(state: SimState): number {
     mix(s.cooldown);
     mix(s.targetId ?? -1);
     mix(s.aimId ?? -1);
+    mix(s.settle);
   }
   return h >>> 0;
 }

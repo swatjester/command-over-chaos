@@ -19,6 +19,8 @@ export interface Combatant {
   tx: number | null;
   suppression: number;
   weapon: WeaponId;
+  /** consecutive stationary ticks */
+  settle: number;
 }
 
 export interface ShotFactor {
@@ -34,10 +36,12 @@ export interface ShotPct {
   base: number;
   visible: boolean;
   inRange: boolean;
+  /** true when the only blocker is the long-range settle requirement */
+  settling: boolean;
   factors: ShotFactor[];
 }
 
-const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, factors: [] };
+const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settling: false, factors: [] };
 
 export function computeShotPct(
   obstacles: readonly Obstacle[], shooter: Combatant, target: Combatant,
@@ -50,6 +54,11 @@ export function computeShotPct(
   }
   const los = losBetween(obstacles, shooter, target);
   if (!los.visible) return { ...NO_SHOT, visible: false, inRange: true };
+
+  // long-range shots require a settled (stationary) shooter
+  if (d > w.settleStart && shooter.settle < w.settleTicks) {
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: true, factors: [] };
+  }
 
   // base accuracy: flat to falloffStart, then linear to minAcc at maxRange
   const base = d <= w.falloffStart
@@ -74,5 +83,5 @@ export function computeShotPct(
   if (los.targetInCover) apply("target in cover", 50);
 
   pct = pct < 1 ? 1 : pct > 99 ? 99 : pct;
-  return { pct, base, visible: true, inRange: true, factors };
+  return { pct, base, visible: true, inRange: true, settling: false, factors };
 }

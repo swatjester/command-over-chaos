@@ -54,6 +54,7 @@ export const SoldierSnapshotSchema = z.object({
   weapon: WeaponIdSchema,
   targetId: z.number().int().nullable(),
   aimId: z.number().int().nullable(),
+  settle: z.number().int(),
 });
 
 export const ShotEventSchema = z.object({

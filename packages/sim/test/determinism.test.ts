@@ -217,3 +217,35 @@ describe("farmstead map", () => {
     expect(blocked(FARMSTEAD_MAP.obstacles, 82 * MM, 75 * MM)).toBe(false);
   });
 });
+
+describe("settle (long-range aim)", () => {
+  it("long-range shots require stillness; settled shooter fires", () => {
+    const s = createState(21); // empty map, open ground
+    const sniper = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
+    spawnSoldier(s, 1, 10 * MM, 80 * MM, "carbine"); // 70m: beyond dmr settleStart (56m), within maxRange
+    let fired = 0;
+    for (let i = 0; i < 44; i++) fired += tick(s, []).length; // settleTicks=45 not yet reached
+    expect(fired).toBe(0);
+    for (let i = 0; i < 60; i++) fired += tick(s, []).length;
+    expect(fired).toBeGreaterThan(0);
+    expect(sniper.settle).toBeGreaterThanOrEqual(45);
+  });
+
+  it("moving resets settle", () => {
+    const s = createState(22);
+    const sniper = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
+    for (let i = 0; i < 100; i++) tick(s, []);
+    expect(sniper.settle).toBeGreaterThan(45);
+    tick(s, [{ type: "move", soldierId: 0, x: 20 * MM, y: 10 * MM, mode: "move" }]);
+    tick(s, []);
+    expect(sniper.settle).toBeLessThanOrEqual(1);
+  });
+
+  it("short-range fire is unaffected by settle", () => {
+    const s = createState(23);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    spawnSoldier(s, 1, 10 * MM, 30 * MM, "carbine"); // 20m < settleStart 38m
+    const events = tick(s, []);
+    expect(events.length).toBeGreaterThan(0); // fires on tick 0, settle 0
+  });
+});

@@ -108,12 +108,17 @@ export function App(): JSX.Element {
         }}>
           <div style={{
             fontSize: 22, fontWeight: 800,
-            color: !shot.visible ? "#8b98a5" : !shot.inRange ? "#8b98a5"
+            color: !shot.visible ? "#8b98a5" : !shot.inRange ? "#8b98a5" : shot.settling ? "#e6b45a"
               : shot.pct >= 60 ? "#5fd68a" : shot.pct >= 30 ? "#e6b45a" : "#e66a5a",
           }}>
-            {!shot.visible ? "NO LOS" : !shot.inRange ? "OUT OF RANGE" : `${shot.pct}%`}
+            {!shot.visible ? "NO LOS" : !shot.inRange ? "OUT OF RANGE" : shot.settling ? "SETTLING…" : `${shot.pct}%`}
           </div>
-          {shot.visible && shot.inRange && (
+          {shot.settling && (
+            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 4 }}>
+              long range — hold still to steady aim
+            </div>
+          )}
+          {shot.visible && shot.inRange && !shot.settling && (
             <div style={{ fontSize: 10, opacity: 0.75, marginTop: 4, lineHeight: 1.6 }}>
               <div>base ({WEAPONS[shooter!.weapon].name.toLowerCase()} @ range): {shot.base}%</div>
               {shot.factors.map((f) => (
@@ -184,7 +189,9 @@ function AimLine({ s, byId }: { s: SoldierSnapshot; byId: Map<number, SoldierSna
     return (
       <div style={{ fontSize: 11, marginTop: 3, height: 14 }}>
         <span style={{ opacity: 0.55 }}>aim </span>
-        <span style={{ color, fontWeight: 800 }}>{shot.pct}%</span>
+        {shot.settling
+          ? <span style={{ color: "#e6b45a", fontWeight: 700 }}>settling…</span>
+          : <span style={{ color, fontWeight: 800 }}>{shot.pct}%</span>}
         <span style={{ opacity: 0.55 }}> → {WEAPONS[target.weapon].name} #{target.id}</span>
       </div>
     );

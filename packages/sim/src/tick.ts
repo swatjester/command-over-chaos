@@ -50,6 +50,7 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
 
   // 2. movement with AABB collision + wall slide
   //    (no pathfinding yet — soldiers slide along walls; navmesh lands in M2)
+  const prevPos = state.soldiers.map((s) => s.x * 0x40000000 + s.y); // cheap pos key
   for (const s of state.soldiers) {
     if (!s.alive || s.tx === null || s.ty === null) continue;
     // pinned soldiers can only crawl
@@ -75,6 +76,13 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
 
   // 3. combat — id order for determinism; simultaneous within a tick
   //    (a soldier killed this tick may still get their queued shot off)
+  // settle: stillness accumulates, any movement resets (long-range gate)
+  for (let i = 0; i < state.soldiers.length; i++) {
+    const s = state.soldiers[i]!;
+    if (!s.alive) continue;
+    s.settle = s.x * 0x40000000 + s.y === prevPos[i] ? Math.min(s.settle + 1, 240) : 0;
+  }
+
   // Two-phase resolution: all shots roll against PRE-damage state, then
   // effects apply. Fire within a tick is simultaneous — no id-order advantage,
   // and mutual kills are possible (as they should be).
