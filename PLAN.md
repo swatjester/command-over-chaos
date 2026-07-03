@@ -37,7 +37,13 @@ A modern-warfare, browser-based, real-time squad tactics game where players micr
 - **Enhanced UX vs. CoC:** the % breaks down on hover-hold (e.g., `62% = base 80 − moving 10 − target in cover 15 + elevation 7`), so the number teaches the game. Also show **time-to-kill estimate** and the *enemy's* % back at you (recon skill-gated — see fireteam abilities).
 - Damage is locational (head/torso/limbs) with armor interaction; no HP sponges — 1–3 hits down a soldier, keeping CoC lethality.
 
-### 2.4 Suppression & morale
+### 2.4 Vision vs. engagement range (locked direction)
+- **Vision is unrestricted by range** — gated only by LOS and fog. Information is symmetric and fair: if a sightline exists, both sides can use it, and scouting/positioning stays meaningful.
+- **Shooting is hard-capped per weapon** (data-driven `maxRange` + accuracy falloff), so an open sightline is never a cross-map death trap — you can *see* across the map, not kill across it.
+- **Long-range platforms pay in mobility, not information:** beyond a weapon's far band (~60–65% of maxRange), the shooter must **settle** — remain stationary for a short aim time before their shot % applies; moving resets it. Preserves overwatch/sniper roles while killing run-and-gun sniping at extreme range. (Settle mechanic: implement alongside remaining M1 polish.)
+- **Role exceptions are data-driven per archetype** (post-M2): e.g., Recon snipers extend the settle band's reach; Weapons Team MGs project *suppression* (not accurate damage) beyond their accurate range as area denial.
+
+### 2.5 Suppression & morale
 - Incoming near-misses build **suppression**: accuracy debuff, screen-edge vignette on the victim's owner, forced flinch at high levels; pinned soldiers can only crawl. Replaces CoC's opaque morale with a visible per-soldier meter (readability pillar).
 
 ---
