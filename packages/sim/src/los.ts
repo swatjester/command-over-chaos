@@ -61,8 +61,10 @@ export function smokeBlocks(
 
 export interface LosSubject { x: number; y: number; stance: Stance; }
 export interface LosResult { visible: boolean; targetInCover: boolean; }
+/** internal: segment result also notes low cover crossed near the SHOOTER */
 
-const BLOCKED: LosResult = { visible: false, targetInCover: false };
+interface SegResult extends LosResult { overTop: boolean; }
+const BLOCKED: SegResult = { visible: false, targetInCover: false, overTop: false };
 
 function pointInBox(x: number, y: number, o: Obstacle): boolean {
   return x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h;
@@ -77,11 +79,12 @@ function pointInBox(x: number, y: number, o: Obstacle): boolean {
 function segmentLos(
   obstacles: readonly Obstacle[], smokes: readonly SmokeCloud[],
   x1: number, y1: number, x2: number, y2: number, target: LosSubject,
-): LosResult {
+): SegResult {
   for (const c of smokes) {
     if (smokeBlocks(x1, y1, x2, y2, c)) return BLOCKED;
   }
   let targetInCover = false;
+  let overTop = false;
   for (const o of obstacles) {
     if (!segmentIntersectsBox(x1, y1, x2, y2, o)) continue;
     if (o.ht > WALL_HEIGHT) return BLOCKED;
@@ -92,8 +95,13 @@ function segmentLos(
       if (target.stance === "prone") return BLOCKED;
       targetInCover = true;
     }
+    // low cover / window near the shooter: they're firing OVER/THROUGH it
+    const nearShooter =
+      x1 > o.x - COVER_NEAR && x1 < o.x + o.w + COVER_NEAR &&
+      y1 > o.y - COVER_NEAR && y1 < o.y + o.h + COVER_NEAR;
+    if (nearShooter) overTop = true;
   }
-  return { visible: true, targetInCover };
+  return { visible: true, targetInCover, overTop };
 }
 
 function peekPoints(s: LosSubject, obstacles: readonly Obstacle[]): Array<[number, number]> {
@@ -108,9 +116,11 @@ export interface LosResultEx extends LosResult {
   /** shooter lean offset (mm) used to obtain this sightline; 0,0 = no lean */
   leanX: number;
   leanY: number;
+  /** sightline passes over low cover / through a window adjacent to shooter */
+  overTop: boolean;
 }
 
-const BLOCKED_EX: LosResultEx = { visible: false, targetInCover: false, leanX: 0, leanY: 0 };
+const BLOCKED_EX: LosResultEx = { visible: false, targetInCover: false, leanX: 0, leanY: 0, overTop: false };
 
 /**
  * LOS with CORNER PEEK (the CoC doorway rule): if the direct line is blocked,
@@ -131,7 +141,7 @@ export function losBetweenEx(
   // target exposed at their frame — no lean needed
   for (const [px, py] of tPeeks) {
     const r = segmentLos(obstacles, smokes, shooter.x, shooter.y, px, py, target);
-    if (r.visible) return { visible: true, targetInCover: true, leanX: 0, leanY: 0 };
+    if (r.visible) return { visible: true, targetInCover: true, leanX: 0, leanY: 0, overTop: r.overTop };
   }
   // shooter leans
   for (const [px, py] of peekPoints(shooter, obstacles)) {
@@ -140,7 +150,7 @@ export function losBetweenEx(
     // mutual lean (same-side facing doorways)
     for (const [qx, qy] of tPeeks) {
       const d = segmentLos(obstacles, smokes, px, py, qx, qy, target);
-      if (d.visible) return { visible: true, targetInCover: true, leanX: px - shooter.x, leanY: py - shooter.y };
+      if (d.visible) return { visible: true, targetInCover: true, leanX: px - shooter.x, leanY: py - shooter.y, overTop: d.overTop };
     }
   }
   return BLOCKED_EX;

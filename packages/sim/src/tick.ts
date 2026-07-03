@@ -1,5 +1,5 @@
-import { computeShotPct } from "./combat.js";
-import { GRENADES, type Boom } from "./grenades.js";
+import { computeShotPct, effectiveSubject } from "./combat.js";
+import { DELIVERY, GL_FRAG, HAND_FRAG, SMOKE, type Boom } from "./grenades.js";
 import { losBetweenEx } from "./los.js";
 import { blocked } from "./map.js";
 import { findPath } from "./path.js";
@@ -31,6 +31,19 @@ const MAX_QUEUE = 64; // waypoints (pathfinding legs included)
 /** Route a move order: A* waypoints, falling back to a straight line. */
 function route(state: SimState, fx: number, fy: number, tx: number, ty: number): Array<[number, number]> {
   return findPath(state.obstacles, state.mapW, state.mapH, fx, fy, tx, ty) ?? [[tx, ty]];
+}
+
+/** hp reached 0 from wounds: down once, dead the second time (revived). */
+function woundOut(s: Soldier): void {
+  s.hp = 0;
+  if (s.revived) {
+    s.alive = false;
+    s.down = false;
+  } else {
+    s.down = true;
+    s.bleed = BLEED_TICKS;
+  }
+  dropSoldier(s);
 }
 
 function dropSoldier(s: Soldier): void {
@@ -99,26 +112,37 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
         break;
       }
       case "throw": {
-        const def = GRENADES[o.kind];
+        const isGl = s.weapon === "carbine_gl";
+        const dv = DELIVERY[isGl ? "gl" : "hand"];
         const have = o.kind === "frag" ? s.frags : s.smokes;
         if (have <= 0) break;
         let gx = clamp(Math.floor(o.x), 0, state.mapW);
         let gy = clamp(Math.floor(o.y), 0, state.mapH);
         const d = dist(s.x, s.y, gx, gy);
-        if (d > def.throwRange) {
-          gx = s.x + Math.floor(((gx - s.x) * def.throwRange) / d);
-          gy = s.y + Math.floor(((gy - s.y) * def.throwRange) / d);
+        if (d > dv.range) {
+          gx = s.x + Math.floor(((gx - s.x) * dv.range) / d);
+          gy = s.y + Math.floor(((gy - s.y) * dv.range) / d);
         }
-        const flight = Math.max(10, Math.ceil(Math.min(d, def.throwRange) / def.flightSpeed));
+        // toss inaccuracy: square cone scaled by distance (GL is much tighter)
+        const maxDev = Math.floor((Math.min(d, dv.range) * dv.devPct) / 100);
+        if (maxDev > 0) {
+          let ox: number, oy: number;
+          [ox, state.rng] = rngInt(state.rng, 2 * maxDev + 1);
+          [oy, state.rng] = rngInt(state.rng, 2 * maxDev + 1);
+          gx = clamp(gx + ox - maxDev, 0, state.mapW);
+          gy = clamp(gy + oy - maxDev, 0, state.mapH);
+        }
+        const flight = Math.max(8, Math.ceil(Math.min(d, dv.range) / dv.flightSpeed));
         const landTick = state.tick + flight;
         state.grenades.push({
           id: state.nextGrenadeId++,
           kind: o.kind,
+          gl: isGl,
           thrower: s.id,
           sx: s.x, sy: s.y, x: gx, y: gy,
           thrownTick: state.tick,
           landTick,
-          explodeTick: landTick + def.fuseAfterLand,
+          explodeTick: landTick + (o.kind === "frag" && !isGl ? HAND_FRAG.fuseAfterLand : 0),
         });
         if (o.kind === "frag") s.frags -= 1; else s.smokes -= 1;
         break;
@@ -181,14 +205,30 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   for (let i = state.grenades.length - 1; i >= 0; i--) {
     const g = state.grenades[i]!;
     if (g.kind === "smoke" && state.tick >= g.landTick) {
-      state.smokes.push({ id: g.id, x: g.x, y: g.y, r: GRENADES.smoke.cloudRadius, ttl: GRENADES.smoke.cloudTtl });
+      state.smokes.push({ id: g.id, x: g.x, y: g.y, r: SMOKE.cloudRadius, ttl: SMOKE.cloudTtl });
       booms.push({ x: g.x, y: g.y, kind: "smoke" });
       state.grenades.splice(i, 1);
     } else if (g.kind === "frag" && state.tick >= g.explodeTick) {
-      const def = GRENADES.frag;
       for (const s of state.soldiers) {
         if (!s.alive) continue;
         const d = dist(s.x, s.y, g.x, g.y);
+        if (g.gl) {
+          // 40mm: downs on direct hit, stuns near — never an instant kill
+          if (d <= GL_FRAG.directRadius) {
+            if (s.down) { s.alive = false; s.down = false; continue; }
+            s.hp = 0;
+            woundOut(s);
+          } else if (d <= GL_FRAG.stunRadius) {
+            if (s.down) continue;
+            s.suppression = 100;
+            s.hp -= GL_FRAG.nearDamage;
+            if (s.hp <= 0) woundOut(s);
+          } else if (d <= GL_FRAG.suppressRadius && !s.down) {
+            s.suppression = Math.min(100, s.suppression + 45);
+          }
+          continue;
+        }
+        const def = HAND_FRAG;
         let dmg = 0;
         if (d <= def.innerRadius) {
           dmg = def.innerMax - Math.floor(((def.innerMax - def.innerMin) * d) / def.innerRadius);
@@ -206,11 +246,11 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
           s.hp = 0;
           if (d <= def.innerRadius) {
             s.alive = false; // adjacent detonation: no saving that
+            s.down = false;
+            dropSoldier(s);
           } else {
-            s.down = true;
-            s.bleed = BLEED_TICKS;
+            woundOut(s);
           }
-          dropSoldier(s);
           continue;
         }
         // stun: pegged suppression inside stunRadius, shaken falloff beyond
@@ -257,6 +297,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     s.aidProgress += 1;
     if (s.aidProgress >= AID_TICKS) {
       t.down = false;
+      t.revived = true; // one revive per soldier — the next downing is fatal
       t.hp = REVIVE_HP;
       t.bleed = 0;
       t.suppression = 60; // woozy
@@ -275,6 +316,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       s.aimId = null;
       s.leanX = 0;
       s.leanY = 0;
+      s.peekUp = false;
       continue;
     }
     const acq = acquireTarget(state, s);
@@ -282,6 +324,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     s.aimId = target ? target.id : null;
     s.leanX = acq?.leanX ?? 0;
     s.leanY = acq?.leanY ?? 0;
+    s.peekUp = acq?.overTop ?? false;
     if (s.cooldown > 0) {
       s.cooldown -= 1;
       continue;
@@ -300,17 +343,26 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     if (hit && target.hp > 0 && !target.down) {
       target.hp -= w.damage;
       if (target.hp <= 0) {
-        target.hp = 0;
-        target.down = true; // small arms drop soldiers; bleed-out or aid decides
-        target.bleed = BLEED_TICKS;
-        dropSoldier(target);
+        woundOut(target); // downs, or kills outright if already revived once
         kill = true;
       }
     }
     if (target.alive && !target.down) {
       target.suppression = Math.min(100, target.suppression + w.suppression);
     }
-    shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x + shooter.leanX, sy: shooter.y + shooter.leanY, tx: target.x + target.leanX, ty: target.y + target.leanY });
+    // misses visibly miss: readable impact offset past/around the target
+    let ix = target.x + target.leanX;
+    let iy = target.y + target.leanY;
+    if (!hit) {
+      let ox: number, oy: number;
+      [ox, state.rng] = rngInt(state.rng, 3001);
+      [oy, state.rng] = rngInt(state.rng, 3001);
+      ox -= 1500; oy -= 1500;
+      if (ox > -700 && ox < 700) ox = ox < 0 ? -700 : 700;
+      if (oy > -700 && oy < 700) oy = oy < 0 ? -700 : 700;
+      ix += ox; iy += oy;
+    }
+    shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x + shooter.leanX, sy: shooter.y + shooter.leanY, tx: ix, ty: iy });
   }
 
   // 6. suppression decay
@@ -322,7 +374,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   return { shots, booms };
 }
 
-interface Acquisition { target: Soldier; leanX: number; leanY: number; }
+interface Acquisition { target: Soldier; leanX: number; leanY: number; overTop: boolean; }
 
 /** Explicit target if valid, else nearest visible enemy in weapon range (lowest id wins ties). */
 function acquireTarget(state: SimState, s: Soldier): Acquisition | null {
@@ -331,8 +383,8 @@ function acquireTarget(state: SimState, s: Soldier): Acquisition | null {
     const t = state.soldiers[s.targetId];
     if (t && t.alive && !t.down) {
       if (dist(s.x, s.y, t.x, t.y) <= w.maxRange) {
-        const los = losBetweenEx(state.obstacles, s, t, state.smokes);
-        if (los.visible) return { target: t, leanX: los.leanX, leanY: los.leanY };
+        const los = losBetweenEx(state.obstacles, s, effectiveSubject(t), state.smokes);
+        if (los.visible) return { target: t, leanX: los.leanX, leanY: los.leanY, overTop: los.overTop };
       }
       // keep the order; they may come back into view
     } else {
@@ -348,9 +400,9 @@ function acquireTarget(state: SimState, s: Soldier): Acquisition | null {
     if (!t.alive || t.down || t.team === s.team) continue;
     const d = dist(s.x, s.y, t.x, t.y);
     if (d > w.maxRange || d >= bestD) continue;
-    const los = losBetweenEx(state.obstacles, s, t, state.smokes);
+    const los = losBetweenEx(state.obstacles, s, effectiveSubject(t), state.smokes);
     if (!los.visible) continue;
-    best = { target: t, leanX: los.leanX, leanY: los.leanY };
+    best = { target: t, leanX: los.leanX, leanY: los.leanY, overTop: los.overTop };
     bestD = d;
   }
   return best;

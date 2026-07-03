@@ -7,7 +7,7 @@ import {
   ACTIVE_MAP, createState, MM, spawnSoldier, tick, TICK_MS,
   type Order, type SimState, type WeaponId,
 } from "@coc/sim";
-import { ARCHETYPE_WEAPONS, type PlayableArchetype } from "@coc/shared";
+import { ARCHETYPE_KITS, type PlayableArchetype } from "@coc/shared";
 import {
   ServerMsgSchema, type Boom, type ClientMsg, type GrenadeSnapshot,
   type ShotEvent, type SmokeSnapshot, type SoldierSnapshot,
@@ -76,11 +76,11 @@ export function connect(
 
 function offline(archetype: PlayableArchetype): Connection {
   const state: SimState = createState(20260702, ACTIVE_MAP);
-  const mine = ARCHETYPE_WEAPONS[archetype] as unknown as WeaponId[];
-  const theirs = ARCHETYPE_WEAPONS.rangers as unknown as WeaponId[];
+  const mine = ARCHETYPE_KITS[archetype];
+  const theirs = ARCHETYPE_KITS.rangers;
   // offline demo: two fireteams face off across the central courtyard
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, mine[i]);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, theirs[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, theirs[i]!.weapon as WeaponId, theirs[i]!.frags, theirs[i]!.smokes);
   let pending: Order[] = [];
   let snapshotCb: SnapshotCb | null = null;
 

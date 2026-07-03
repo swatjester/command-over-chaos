@@ -37,11 +37,12 @@ export function hashState(state: SimState): number {
     mix(s.leanX); mix(s.leanY);
     mix(s.down ? 1 : 0); mix(s.bleed);
     mix(s.aidId ?? -1); mix(s.aidProgress);
+    mix(s.revived ? 1 : 0); mix(s.peekUp ? 1 : 0);
     mix(s.queue.length);
     for (const [qx, qy] of s.queue) { mix(qx); mix(qy); }
   }
   for (const g of state.grenades) {
-    mix(g.id); mix(g.kind === "frag" ? 0 : 1); mix(g.thrower);
+    mix(g.id); mix(g.kind === "frag" ? 0 : 1); mix(g.gl ? 1 : 0); mix(g.thrower);
     mix(g.sx); mix(g.sy); mix(g.x); mix(g.y);
     mix(g.thrownTick); mix(g.landTick); mix(g.explodeTick);
   }

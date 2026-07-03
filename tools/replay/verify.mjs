@@ -25,7 +25,7 @@ function run() {
     const evs = byTick.get(t) ?? [];
     let orders = [];
     for (const e of evs) {
-      if (e.spawns) for (const sp of e.spawns) spawnSoldier(state, sp.team, sp.x, sp.y, sp.weapon);
+      if (e.spawns) for (const sp of e.spawns) spawnSoldier(state, sp.team, sp.x, sp.y, sp.weapon, sp.frags ?? 2, sp.smokes ?? 1);
       if (e.reaps) for (const id of e.reaps) { const s = state.soldiers[id]; if (s) { s.alive = false; s.down = false; } }
       if (e.orders) orders = orders.concat(e.orders);
     }

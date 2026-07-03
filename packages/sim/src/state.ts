@@ -12,7 +12,7 @@ export const PIN_THRESHOLD = 70;
 /** Downed soldiers bleed out after this many ticks (60s) without aid. */
 export const BLEED_TICKS = 1800;
 /** Adjacent-ally revive channel length (3s) and reach (mm). */
-export const AID_TICKS = 90;
+export const AID_TICKS = 150; // 5s
 export const AID_RANGE = 1600;
 /** HP restored by a field revive. */
 export const REVIVE_HP = 25;
@@ -60,6 +60,10 @@ export interface Soldier {
   aidId: number | null;
   /** aid channel progress (ticks, revive at AID_TICKS) */
   aidProgress: number;
+  /** already field-revived once — the next downing is fatal */
+  revived: boolean;
+  /** currently peeking over adjacent low cover / through a window to aim */
+  peekUp: boolean;
 }
 
 export interface SimState {
@@ -100,6 +104,7 @@ export function createState(seed: number, map?: MapDef): SimState {
 
 export function spawnSoldier(
   s: SimState, team: 0 | 1, x: number, y: number, weapon: WeaponId = "carbine",
+  frags = 2, smokes = 1,
 ): Soldier {
   const soldier: Soldier = {
     id: s.soldiers.length,
@@ -107,8 +112,8 @@ export function spawnSoldier(
     stance: "stand", moveMode: "move",
     hp: 100, suppression: 0, alive: true,
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
-    queue: [], frags: 2, smokes: 2, holdFire: false, leanX: 0, leanY: 0,
-    down: false, bleed: 0, aidId: null, aidProgress: 0,
+    queue: [], frags, smokes, holdFire: false, leanX: 0, leanY: 0,
+    down: false, bleed: 0, aidId: null, aidProgress: 0, revived: false, peekUp: false,
   };
   s.soldiers.push(soldier);
   return soldier;

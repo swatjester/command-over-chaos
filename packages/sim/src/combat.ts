@@ -6,7 +6,8 @@
 import { losBetween, type SmokeCloud } from "./los.js";
 import type { Obstacle } from "./map.js";
 import { dist } from "./math.js";
-import type { MoveMode, Stance } from "./state.js";
+import type { Stance } from "./state.js";
+import type { MoveMode } from "./state.js";
 import { WEAPONS, type WeaponId } from "./weapons.js";
 
 /** Everything shot % needs — both sim Soldier and protocol snapshot satisfy this. */
@@ -21,6 +22,13 @@ export interface Combatant {
   weapon: WeaponId;
   /** consecutive stationary ticks */
   settle: number;
+  /** aiming over adjacent low cover / through a window (prone counts as crouch) */
+  peekUp: boolean;
+}
+
+/** A peeking-over prone soldier presents a crouch-sized profile and is not hidden. */
+export function effectiveSubject(c: Combatant): { x: number; y: number; stance: Combatant["stance"] } {
+  return { x: c.x, y: c.y, stance: c.peekUp && c.stance === "prone" ? "crouch" : c.stance };
 }
 
 export interface ShotFactor {
@@ -48,12 +56,13 @@ export function computeShotPct(
   smokes: readonly SmokeCloud[] = [],
 ): ShotPct {
   const w = WEAPONS[shooter.weapon];
+  const tEff = effectiveSubject(target);
   const d = dist(shooter.x, shooter.y, target.x, target.y);
   if (d > w.maxRange) {
-    const los = losBetween(obstacles, shooter, target, smokes);
+    const los = losBetween(obstacles, shooter, tEff, smokes);
     return { ...NO_SHOT, visible: los.visible, inRange: false };
   }
-  const los = losBetween(obstacles, shooter, target, smokes);
+  const los = losBetween(obstacles, shooter, tEff, smokes);
   if (!los.visible) return { ...NO_SHOT, visible: false, inRange: true };
 
   // long-range shots require a settled (stationary) shooter
@@ -79,7 +88,7 @@ export function computeShotPct(
     apply("shooter moving", shooter.moveMode === "sprint" ? 35 : shooter.moveMode === "move" ? 60 : shooter.moveMode === "sneak" ? 75 : 65);
   }
   if (shooter.suppression > 0) apply("suppressed", 100 - Math.floor(shooter.suppression / 2));
-  apply("target profile", target.stance === "prone" ? 55 : target.stance === "crouch" ? 80 : 100);
+  apply("target profile", tEff.stance === "prone" ? 55 : tEff.stance === "crouch" ? 80 : 100);
   if (target.tx !== null) apply("target moving", target.moveMode === "sprint" ? 75 : 90);
   if (los.targetInCover) apply("target in cover", 50);
 

@@ -4,7 +4,7 @@ import { z } from "zod";
 
 export const MoveModeSchema = z.enum(["sprint", "move", "sneak", "crawl"]);
 export const StanceSchema = z.enum(["stand", "crouch", "prone"]);
-export const WeaponIdSchema = z.enum(["carbine", "smg", "dmr", "lmg"]);
+export const WeaponIdSchema = z.enum(["carbine", "smg", "dmr", "lmg", "carbine_gl"]);
 export const GrenadeKindSchema = z.enum(["frag", "smoke"]);
 
 export const OrderSchema = z.discriminatedUnion("type", [
@@ -93,6 +93,8 @@ export const SoldierSnapshotSchema = z.object({
   bleed: z.number().int(),
   aidId: z.number().int().nullable(),
   aidProgress: z.number().int(),
+  revived: z.boolean(),
+  peekUp: z.boolean(),
   queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 
@@ -110,6 +112,7 @@ export const ShotEventSchema = z.object({
 export const GrenadeSnapshotSchema = z.object({
   id: z.number().int(),
   kind: GrenadeKindSchema,
+  gl: z.boolean(),
   sx: z.number().int(),
   sy: z.number().int(),
   x: z.number().int(),

@@ -260,9 +260,10 @@ describe("grenades + queueing", () => {
     const s = createState(31);
     const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
     const b = spawnSoldier(s, 1, 10 * MM, 40 * MM, "carbine");
-    // throw smoke halfway between them
-    tick(s, [{ type: "throw", soldierId: 0, kind: "smoke", x: 10 * MM, y: 25 * MM }]);
-    expect(a.smokes).toBe(1);
+    // throw smoke up the line (12m: inside hand range, deviation <=1.2m
+    // still leaves a >r chord across the sightline)
+    tick(s, [{ type: "throw", soldierId: 0, kind: "smoke", x: 10 * MM, y: 22 * MM }]);
+    expect(a.smokes).toBe(0); // default kit carries one smoke now
     // let it land + deploy
     for (let i = 0; i < 40; i++) tick(s, []);
     expect(s.smokes.length).toBe(1);
@@ -404,9 +405,9 @@ describe("smoke edge visibility", () => {
 describe("frag stun-vs-kill", () => {
   it("adjacent detonation kills; standoff detonation stuns", () => {
     const s = createState(54);
-    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
-    const adjacent = spawnSoldier(s, 1, 10 * MM, 30500); // 0.5m from blast
-    const standoff = spawnSoldier(s, 1, 10 * MM, 34 * MM); // 4m from blast
+    spawnSoldier(s, 0, 10 * MM, 25 * MM, "carbine"); // 5m toss: max dev 0.5m
+    const adjacent = spawnSoldier(s, 1, 10 * MM, 30 * MM);  // ground zero (<=0.7m: guaranteed lethal)
+    const standoff = spawnSoldier(s, 1, 10 * MM, 37 * MM);  // >=6.3m from any landing
     // isolate the frag: thrower holds fire
     tick(s, [
       { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 30 * MM },
@@ -420,8 +421,8 @@ describe("frag stun-vs-kill", () => {
 
   it("stun pins soldiers near the blast", () => {
     const s = createState(55);
-    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
-    const victim = spawnSoldier(s, 1, 10 * MM, 33 * MM); // 3m: stun radius
+    spawnSoldier(s, 0, 10 * MM, 20 * MM, "carbine");
+    const victim = spawnSoldier(s, 1, 10 * MM, 33 * MM); // <=4.2m from any landing: stun radius
     tick(s, [
       { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 30 * MM },
       { type: "firemode", soldierId: 0, hold: true },
@@ -491,13 +492,13 @@ describe("pathfinding", () => {
   it("routes around the farmstead maison and is deterministic", () => {
     const run = (): number => {
       const s = createState(71, FARMSTEAD_MAP);
-      spawnSoldier(s, 0, 75 * MM, 15 * MM); // north of maison
+      spawnSoldier(s, 0, 75 * MM, 10 * MM); // north of maison
       tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]); // south of it
       for (let i = 0; i < 3000; i++) tick(s, []);
       return hashState(s);
     };
     const s = createState(71, FARMSTEAD_MAP);
-    const sol = spawnSoldier(s, 0, 75 * MM, 15 * MM);
+    const sol = spawnSoldier(s, 0, 75 * MM, 10 * MM);
     tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]);
     for (let i = 0; i < 3000; i++) tick(s, []);
     expect(sol.x).toBe(75 * MM);
@@ -567,5 +568,74 @@ describe("down / bleed-out / revive", () => {
     spawnSoldier(s, 1, 10 * MM, 25 * MM, "carbine");
     const ev = tick(s, []);
     expect(ev.shots.length).toBe(0);
+  });
+});
+
+describe("grenadier (GL) doctrine", () => {
+  it("GL reaches far, downs on direct hit, never insta-kills", () => {
+    const s = createState(91);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine_gl", 6, 4);
+    const target = spawnSoldier(s, 1, 10 * MM, 45 * MM, "carbine"); // 35m: hand can't, GL can
+    target.stance = "prone";
+    tick(s, [
+      { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 45 * MM },
+      { type: "firemode", soldierId: 0, hold: true },
+      { type: "firemode", soldierId: 1, hold: true },
+    ]);
+    for (let i = 0; i < 60; i++) tick(s, []);
+    // 3% dev at 35m = ~1m: inside directRadius (1.5m) -> down, never dead
+    expect(target.down).toBe(true);
+    expect(target.alive).toBe(true);
+  });
+
+  it("GL near miss stuns without downing a healthy target", () => {
+    const s = createState(92);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine_gl", 6, 4);
+    const target = spawnSoldier(s, 1, 10 * MM, 42500, "carbine"); // ~2.6m off aimpoint
+    target.stance = "prone";
+    tick(s, [
+      { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 40 * MM },
+      { type: "firemode", soldierId: 0, hold: true },
+      { type: "firemode", soldierId: 1, hold: true },
+    ]);
+    let peak = 0;
+    for (let i = 0; i < 60; i++) {
+      tick(s, []);
+      peak = Math.max(peak, target.suppression);
+    }
+    expect(target.down).toBe(false);
+    expect(target.alive).toBe(true);
+    expect(peak).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe("revive once", () => {
+  it("second downing is fatal", () => {
+    const s = createState(93);
+    const a = spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    a.revived = true; // already used their one revive
+    a.hp = 10;
+    spawnSoldier(s, 1, 10 * MM, 25 * MM, "lmg");
+    tick(s, [{ type: "firemode", soldierId: 0, hold: true }]);
+    for (let i = 0; i < 3000 && a.alive; i++) tick(s, []);
+    expect(a.alive).toBe(false); // dead, not down
+    expect(a.down).toBe(false);
+  });
+});
+
+describe("windows + peek-over", () => {
+  it("windows allow fire with cover; prone-behind-window is hidden until they aim", () => {
+    const s = createState(94, FARMSTEAD_MAP);
+    // maison north window at x 73..76, y ~14; defender inside behind it
+    const defender = spawnSoldier(s, 0, 74500, 15200, "carbine");
+    defender.stance = "prone";
+    const attacker = spawnSoldier(s, 1, 74500, 8 * MM, "carbine");
+    // tucked prone behind the window: hidden
+    expect(losBetween(s.obstacles, attacker, defender).visible).toBe(false);
+    // once they aim through it (peekUp), they present a crouch profile
+    defender.peekUp = true;
+    const shot = computeShotPct(s.obstacles, attacker, { ...defender, tx: null });
+    expect(shot.visible).toBe(true);
+    expect(shot.factors.some((f) => f.label === "target in cover")).toBe(true);
   });
 });

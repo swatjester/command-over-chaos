@@ -105,6 +105,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   for (const o of ACTIVE_MAP.obstacles) {
     const w = o.w / 1000, d = o.h / 1000, ht = o.ht / 1000;
     const cx = o.x / 1000 + w / 2, cz = o.y / 1000 + d / 2;
+    if (o.kind === "window") {
+      // sill + lintel with an open firing gap between
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), KIND_MATS.wall);
+      sill.position.set(cx, 0.5, cz);
+      sill.castShadow = true;
+      sill.receiveShadow = true;
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), KIND_MATS.wall);
+      lintel.position.set(cx, 2.45, cz);
+      lintel.castShadow = true;
+      scene.add(sill, lintel);
+      continue;
+    }
     if (o.kind === "tree") {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 2.2, 8), KIND_MATS.trunk);
       trunk.position.set(cx, 1.1, cz);
@@ -203,7 +215,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       } else if (s.alive && s.down) {
         g.scale.y = 0.28; // downed: flat but not gone — revivable
       } else if (s.alive) {
-        g.scale.y = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
+        const base = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
+        // peeking over cover: rise toward crouch height while aiming
+        g.scale.y = s.peekUp && base < 0.72 ? 0.72 : base;
       }
       // waypoint path for selected own soldiers
       if (selSet.has(s.id) && mySet.has(s.id) && s.alive && s.tx !== null && s.ty !== null) {

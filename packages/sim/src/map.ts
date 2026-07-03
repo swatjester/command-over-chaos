@@ -4,7 +4,7 @@
  * world you see is exactly the world the server simulates.
  */
 
-export type ObstacleKind = "wall" | "stone" | "hay" | "tree" | "fence" | "shed";
+export type ObstacleKind = "wall" | "stone" | "hay" | "tree" | "fence" | "shed" | "window";
 
 export interface Obstacle {
   /** corner-based AABB, millimeters */
@@ -78,36 +78,59 @@ export const GREYBOX_MAP: MapDef = {
 function farmstead(): MapDef {
   const obs: Obstacle[] = [];
 
-  // === MAISON (north team building) — 26x14m at (62..88, 21..35) ===========
+  // === MAISON (north building) — 40x22m, 4 rooms, windows all around ======
+  // exterior x 55..95, y 14..36; doors: south (center 75), west, east; every
+  // window is a firing position (blocks movement, low-cover LOS semantics)
   obs.push(
-    o(62, 20.8, 26, 0.4, 3, "wall"),               // north wall
-    o(62, 34.8, 11, 0.4, 3, "wall"),               // south wall, door 73..77
-    o(77, 34.8, 11, 0.4, 3, "wall"),
-    o(61.8, 21, 0.4, 14, 3, "wall"),               // west wall
-    o(87.8, 21, 0.4, 5, 3, "wall"),                // east wall, door 26..29
-    o(87.8, 29, 0.4, 6, 3, "wall"),
-    o(62, 27.8, 8, 0.4, 3, "wall"),                // interior, gap 70..74
-    o(74, 27.8, 6, 0.4, 3, "wall"),
+    // north wall: windows at 62-65, 73-76, 84-87
+    o(55, 13.8, 7, 0.4, 3, "wall"), o(62, 13.8, 3, 0.4, 1.1, "window"),
+    o(65, 13.8, 8, 0.4, 3, "wall"), o(73, 13.8, 3, 0.4, 1.1, "window"),
+    o(76, 13.8, 8, 0.4, 3, "wall"), o(84, 13.8, 3, 0.4, 1.1, "window"),
+    o(87, 13.8, 8, 0.4, 3, "wall"),
+    // south wall: door 73.5..76.5, windows 60-63 and 86-89
+    o(55, 35.8, 5, 0.4, 3, "wall"), o(60, 35.8, 3, 0.4, 1.1, "window"),
+    o(63, 35.8, 10.5, 0.4, 3, "wall"), o(76.5, 35.8, 9.5, 0.4, 3, "wall"),
+    o(86, 35.8, 3, 0.4, 1.1, "window"), o(89, 35.8, 6, 0.4, 3, "wall"),
+    // west wall: door 22..25, window 30-33
+    o(54.8, 14, 0.4, 8, 3, "wall"), o(54.8, 25, 0.4, 5, 3, "wall"),
+    o(54.8, 30, 0.4, 3, 1.1, "window"), o(54.8, 33, 0.4, 3, 3, "wall"),
+    // east wall: window 18-21, door 28..31
+    o(94.8, 14, 0.4, 4, 3, "wall"), o(94.8, 18, 0.4, 3, 1.1, "window"),
+    o(94.8, 21, 0.4, 7, 3, "wall"), o(94.8, 31, 0.4, 5, 3, "wall"),
+    // interior: E-W wall y=25 (door 64..67), N-S walls x=75 (door 18..21)
+    // and x=80 (door 29..32) => 4 rooms
+    o(55, 24.8, 9, 0.4, 3, "wall"), o(67, 24.8, 8, 0.4, 3, "wall"),
+    o(74.8, 14, 0.4, 4, 3, "wall"), o(74.8, 21, 0.4, 4, 3, "wall"),
+    o(79.8, 25, 0.4, 4, 3, "wall"), o(79.8, 32, 0.4, 4, 3, "wall"),
   );
 
-  // === CHURCH (south team building) — cross: nave (70..80, 110..134), transept (63..87, 118..126)
+  // === CHURCH (south building) — big cross: nave 16x36, transept 40x12 ====
+  // nave x 67..83, y 104..140; transept x 55..95, y 116..128
   obs.push(
-    o(70, 109.8, 3.5, 0.4, 3, "wall"),             // north face, door 73.5..76.5
-    o(76.5, 109.8, 3.5, 0.4, 3, "wall"),
-    o(70, 133.8, 3.5, 0.4, 3, "wall"),             // south face, door
-    o(76.5, 133.8, 3.5, 0.4, 3, "wall"),
-    o(69.8, 110, 0.4, 8, 3, "wall"),               // nave west (transept opening 118..126)
-    o(69.8, 126, 0.4, 8, 3, "wall"),
-    o(79.8, 110, 0.4, 8, 3, "wall"),               // nave east
-    o(79.8, 126, 0.4, 8, 3, "wall"),
-    o(63, 117.8, 7, 0.4, 3, "wall"),               // transept north
-    o(80, 117.8, 7, 0.4, 3, "wall"),
-    o(63, 125.8, 7, 0.4, 3, "wall"),               // transept south
-    o(80, 125.8, 7, 0.4, 3, "wall"),
-    o(62.8, 118, 0.4, 3, 3, "wall"),               // transept west end, door 121..123
-    o(62.8, 123, 0.4, 3, 3, "wall"),
-    o(86.8, 118, 0.4, 3, 3, "wall"),               // transept east end, door
-    o(86.8, 123, 0.4, 3, 3, "wall"),
+    // nave north face: door 73.5..76.5, windows flanking
+    o(67, 103.8, 2.5, 0.4, 3, "wall"), o(69.5, 103.8, 3, 0.4, 1.1, "window"),
+    o(72.5, 103.8, 1, 0.4, 3, "wall"), o(76.5, 103.8, 1, 0.4, 3, "wall"),
+    o(77.5, 103.8, 3, 0.4, 1.1, "window"), o(80.5, 103.8, 2.5, 0.4, 3, "wall"),
+    // nave south face: mirror
+    o(67, 139.8, 2.5, 0.4, 3, "wall"), o(69.5, 139.8, 3, 0.4, 1.1, "window"),
+    o(72.5, 139.8, 1, 0.4, 3, "wall"), o(76.5, 139.8, 1, 0.4, 3, "wall"),
+    o(77.5, 139.8, 3, 0.4, 1.1, "window"), o(80.5, 139.8, 2.5, 0.4, 3, "wall"),
+    // nave west wall (transept opening 116..128), windows in each half
+    o(66.8, 104, 0.4, 4, 3, "wall"), o(66.8, 108, 0.4, 3, 1.1, "window"), o(66.8, 111, 0.4, 5, 3, "wall"),
+    o(66.8, 128, 0.4, 3, 3, "wall"), o(66.8, 131, 0.4, 3, 1.1, "window"), o(66.8, 134, 0.4, 6, 3, "wall"),
+    // nave east wall: mirror
+    o(82.8, 104, 0.4, 4, 3, "wall"), o(82.8, 108, 0.4, 3, 1.1, "window"), o(82.8, 111, 0.4, 5, 3, "wall"),
+    o(82.8, 128, 0.4, 3, 3, "wall"), o(82.8, 131, 0.4, 3, 1.1, "window"), o(82.8, 134, 0.4, 6, 3, "wall"),
+    // transept walls with windows
+    o(55, 115.8, 3, 0.4, 3, "wall"), o(58, 115.8, 3, 0.4, 1.1, "window"), o(61, 115.8, 6, 0.4, 3, "wall"),
+    o(83, 115.8, 6, 0.4, 3, "wall"), o(89, 115.8, 3, 0.4, 1.1, "window"), o(92, 115.8, 3, 0.4, 3, "wall"),
+    o(55, 127.8, 3, 0.4, 3, "wall"), o(58, 127.8, 3, 0.4, 1.1, "window"), o(61, 127.8, 6, 0.4, 3, "wall"),
+    o(83, 127.8, 6, 0.4, 3, "wall"), o(89, 127.8, 3, 0.4, 1.1, "window"), o(92, 127.8, 3, 0.4, 3, "wall"),
+    // transept end walls with doors (120.5..123.5)
+    o(54.8, 116, 0.4, 4.5, 3, "wall"), o(54.8, 123.5, 0.4, 4.5, 3, "wall"),
+    o(94.8, 116, 0.4, 4.5, 3, "wall"), o(94.8, 123.5, 0.4, 4.5, 3, "wall"),
+    // interior: altar partition (door 73..77)
+    o(67, 131.8, 6, 0.4, 3, "wall"), o(77, 131.8, 6, 0.4, 3, "wall"),
   );
 
   // === CENTER POI: walled courtyard with well (68..82, 70..80) =============

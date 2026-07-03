@@ -193,11 +193,25 @@ fireteam/
 | **M0 — Foundation** | 2–3 wks | Repo, CI, deterministic sim skeleton (tick, movement, LOS grid), Three.js iso camera + placeholder map, single soldier moving with prediction against local server |
 | **M1 — Combat vertical slice** | 4–6 wks | 4-soldier control, stances/movement modes, shot-% engine + UI, cover/suppression, one greybox map, 1v1 over the internet, replay capture. **Benchmark netcode + server density** |
 | **M2 — Squad play** | 4–6 wks | **Navmesh pathfinding** (soldiers route around obstacles; stance-aware clearance + vault links — replaces the M0/M1 interim of direct movement with wall-slide collision), grenades/smoke (LOS-blocking), buildings + cutaway, buddy actions, 3 archetypes (Infantry/Rangers/Recon), 2v2–4v4, basic lobby, bootcamp tutorial |
+| **M2.1 — Squad-play backlog** (deferred from M2) | 1–2 wks | Basic lobby, bootcamp tutorial, vault links + stance-aware nav clearance, multi-floor building cutaway |
 | **M3 — The meta** | 6–8 wks | All 6 archetypes, Commander layer, PP rank system + hidden MMR, accounts, in-client social (friends/party/chat), stat pipeline (ClickHouse), profile pages, 3 polished maps, closed alpha with ex-CoC community (NA servers) |
 | **M4 — Regiments & esports** | 6–8 wks | Regiment system, regiment ladder + challenge flow, Discord integration/bot, spectator/caster client, tournament mode, replay viewer on web, public stats API, open beta (NA) |
 | **M5 — Polish & launch** | ongoing | Art pass to final quality, map editor, seasonal system, monetization (cosmetics-only), launch tournament |
 
 **De-risk order matters:** netcode feel + shot-% combat readability (M1) is the whole bet — playtest brutally there before building the meta on top.
+
+### Milestone status (live — keep current when deferring/completing)
+
+_As of 2026-07-02:_
+
+- **M0 — Foundation: ✓ complete**
+- **M1 — Combat vertical slice: ✓ complete** — shot-% engine with breakdown UI, LOS/cover/corner-peek/lean, suppression + pinning, settle mechanic, Farmstead map, squad controls, grenades, replay capture + verifier, 2-team netcode verified
+- **M2 — Squad play: core ✓ complete** — A* pathfinding (wall-slide fallback), hand vs GL grenade doctrine, buddy down/bleed-out/revive (once), session reclaim (I-001), 3 archetype kits, enlarged multi-room buildings with windows, over-the-top peeking
+- **M2.1 — Squad-play backlog: ⏳ pending** (see roadmap row)
+- **M3 — The meta: next up**
+
+### Grenade doctrine (locked)
+Hand frags: short range (~15m), toss deviation (~10% of distance), lethal only adjacent, stun near. Grenadiers (Carbine + GL): 40mm from the launcher — ~45m, tight (~3%) accuracy, impact-fuzed, **downs on direct hit, stuns on near miss, never insta-kills**; 6 frag + 4 smoke (others carry 2/1; Rangers +1 each). One grenadier per fireteam replaces a rifle/DMR slot.
 
 ## 10. Monetization (esports-compatible)
 Free-to-play; cosmetics only (soldier gear skins, regiment insignia slots, spectator flair). No gameplay purchases, no loot boxes. Optional regiment "supporter" tier (extra VOD storage, custom server regions for scrims).

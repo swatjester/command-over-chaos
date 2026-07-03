@@ -20,9 +20,10 @@ export function stepToward(
 ): [number, number, boolean] {
   const d = dist(x, y, tx, ty);
   if (d <= step) return [tx, ty, true];
-  // floor keeps coordinates integral; slight undershoot is fine and deterministic
-  const nx = x + Math.floor(((tx - x) * step) / d);
-  const ny = y + Math.floor(((ty - y) * step) / d);
+  // trunc (toward zero) keeps coordinates integral AND direction-symmetric:
+  // floor() made northbound/westbound movers marginally faster (I-002)
+  const nx = x + Math.trunc(((tx - x) * step) / d);
+  const ny = y + Math.trunc(((ty - y) * step) / d);
   return [nx, ny, false];
 }
 

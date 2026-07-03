@@ -11,7 +11,7 @@ import {
   TICK_MS, TICK_RATE, type Boom, type Order, type ShotEvent, type Soldier, type WeaponId,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
-import { ARCHETYPE_WEAPONS, DEFAULT_SERVER_PORT, type PlayableArchetype } from "@coc/shared";
+import { ARCHETYPE_KITS, DEFAULT_SERVER_PORT, type PlayableArchetype } from "@coc/shared";
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const RECONNECT_GRACE_MS = 120_000;
@@ -26,7 +26,7 @@ let pendingBooms: Boom[] = [];
 interface ReplayEvent {
   t: number;
   orders?: Order[];
-  spawns?: Array<{ team: 0 | 1; x: number; y: number; weapon: WeaponId }>;
+  spawns?: Array<{ team: 0 | 1; x: number; y: number; weapon: WeaponId; frags: number; smokes: number }>;
   reaps?: number[];
 }
 const replay = {
@@ -102,12 +102,13 @@ function handleJoin(ws: WebSocket, token: string, archetype: PlayableArchetype):
     const team = (nextPlayerNum % 2) as 0 | 1;
     const anchors = ACTIVE_MAP.spawns[team];
     const [ax, ay] = anchors[Math.floor(nextPlayerNum / 2) % anchors.length]!;
-    const weapons = ARCHETYPE_WEAPONS[archetype] as unknown as WeaponId[];
+    const kit = ARCHETYPE_KITS[archetype];
     const spawns: NonNullable<ReplayEvent["spawns"]> = [];
-    const soldierIds = weapons.map((weapon, i) => {
+    const soldierIds = kit.map((k, i) => {
       const x = ax + Math.round((i - 1.5) * 3 * MM);
-      spawns.push({ team, x, y: ay, weapon });
-      return spawnSoldier(state, team, x, ay, weapon).id;
+      const weapon = k.weapon as WeaponId;
+      spawns.push({ team, x, y: ay, weapon, frags: k.frags, smokes: k.smokes });
+      return spawnSoldier(state, team, x, ay, weapon, k.frags, k.smokes).id;
     });
     replay.events.push({ t: state.tick, spawns });
     player = { id: `p${nextPlayerNum++}`, token, team, soldierIds, ws, reapTimer: null };

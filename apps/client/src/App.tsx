@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
 import { ACTIVE_MAP, computeShotPct, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
-import { ARCHETYPE_WEAPONS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
+import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
 import { connect, type Connection, type SnapshotData } from "./game/net.js";
 import { createScene, type SceneApi } from "./game/scene.js";
 
@@ -165,7 +165,7 @@ export function App(): JSX.Element {
         <div style={{ fontWeight: 800, letterSpacing: 3, fontSize: 22 }}>{GAME_NAME.toUpperCase()}</div>
         <div style={{ opacity: 0.6, fontSize: 13 }}>Select your fireteam</div>
         <div style={{ display: "flex", gap: 14 }}>
-          {(Object.keys(ARCHETYPE_WEAPONS) as PlayableArchetype[]).map((a) => (
+          {(Object.keys(ARCHETYPE_KITS) as PlayableArchetype[]).map((a) => (
             <button
               key={a}
               onClick={() => {
@@ -179,7 +179,9 @@ export function App(): JSX.Element {
             >
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8, textTransform: "capitalize" }}>{a}</div>
               <div style={{ fontSize: 11, opacity: 0.65, lineHeight: 1.8 }}>
-                {ARCHETYPE_WEAPONS[a].map((w, i) => <div key={i}>{w.toUpperCase()}</div>)}
+                {ARCHETYPE_KITS[a].map((k, i) => (
+                  <div key={i}>{k.weapon.toUpperCase().replace("_GL", " (GL)")} · {k.frags}F {k.smokes}S</div>
+                ))}
               </div>
             </button>
           ))}
@@ -279,6 +281,7 @@ export function App(): JSX.Element {
               <span style={{ opacity: 0.8 }}>
                 [{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}
                 {s.alive && s.holdFire && <span style={{ color: "#e6b45a", fontWeight: 700 }}> HOLD</span>}
+                {s.alive && s.revived && <span style={{ color: "#e66a5a", fontWeight: 700 }} title="already revived — next down is fatal"> ✚</span>}
               </span>
               {!s.alive ? <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>
                 : s.down ? <span style={{ color: "#e6b45a", fontWeight: 700 }}>DOWN</span>
@@ -297,7 +300,7 @@ export function App(): JSX.Element {
               <span>
                 {!s.alive ? "—"
                   : s.down ? "bleeding out — right-click with an ally to revive"
-                  : s.aidId !== null ? `aiding #${s.aidId} (${Math.round((s.aidProgress / 90) * 100)}%)`
+                  : s.aidId !== null ? `aiding #${s.aidId} (${Math.round((s.aidProgress / 150) * 100)}%)`
                   : `${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`}
               </span>
               {s.alive && <span style={{ opacity: 0.9 }}>Q×{s.frags} E×{s.smokes}</span>}

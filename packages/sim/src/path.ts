@@ -172,5 +172,44 @@ export function findPath(
   }
   if (exactGoal && pts.length > 0) pts[pts.length - 1] = [tx, ty];
   else if (exactGoal) pts.push([tx, ty]);
-  return pts.length > 0 ? pts : [[tx, ty]];
+  if (pts.length === 0) return [[tx, ty]];
+  return smooth(obstacles, sx, sy, pts);
+}
+
+/** Walkability of a straight segment: sample every 300mm. */
+function segmentWalkable(
+  obstacles: readonly Obstacle[], x1: number, y1: number, x2: number, y2: number,
+): boolean {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.floor(Math.sqrt(dx * dx + dy * dy));
+  const steps = Math.max(1, Math.ceil(len / 300));
+  for (let i = 1; i <= steps; i++) {
+    const px = x1 + Math.floor((dx * i) / steps);
+    const py = y1 + Math.floor((dy * i) / steps);
+    if (blocked(obstacles, px, py)) return false;
+  }
+  return true;
+}
+
+/**
+ * String pulling: skip waypoints reachable by a straight walkable line.
+ * Routes become geometric rather than grid artifacts — near-mirror paths
+ * for mirrored orders (I-002).
+ */
+function smooth(
+  obstacles: readonly Obstacle[], sx: number, sy: number, pts: Array<[number, number]>,
+): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let cx = sx, cy = sy;
+  let i = 0;
+  while (i < pts.length) {
+    let j = pts.length - 1;
+    for (; j > i; j--) {
+      if (segmentWalkable(obstacles, cx, cy, pts[j]![0], pts[j]![1])) break;
+    }
+    out.push(pts[j]!);
+    [cx, cy] = pts[j]!;
+    i = j + 1;
+  }
+  return out;
 }
