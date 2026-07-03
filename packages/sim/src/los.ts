@@ -103,25 +103,52 @@ function peekPoints(s: LosSubject, obstacles: readonly Obstacle[]): Array<[numbe
   return pts.filter(([px, py]) => !obstacles.some((o) => pointInBox(px, py, o)));
 }
 
+export interface LosResultEx extends LosResult {
+  /** shooter lean offset (mm) used to obtain this sightline; 0,0 = no lean */
+  leanX: number;
+  leanY: number;
+}
+
+const BLOCKED_EX: LosResultEx = { visible: false, targetInCover: false, leanX: 0, leanY: 0 };
+
 /**
  * LOS with CORNER PEEK (the CoC doorway rule): if the direct line is blocked,
- * a soldier hugging a corner effectively leans PEEK_DIST to see around it —
- * and a target hugging a corner is partially exposed (seen, but in cover).
- * Peeking is symmetric: if A sees B via a lean, B sees A the same way.
+ * a soldier hugging a corner leans PEEK_DIST to see around it — and a target
+ * hugging a corner (within a body width of the frame) is partially exposed:
+ * seen, but in cover. Lean-vs-lean is included, so two soldiers hugging the
+ * same side of facing doorways trade fire through both gaps.
+ * Preference order minimizes shooter exposure: direct, then exposed target,
+ * then own lean, then mutual lean. Symmetric: a lean that reveals also exposes.
  */
+export function losBetweenEx(
+  obstacles: readonly Obstacle[], shooter: LosSubject, target: LosSubject,
+  smokes: readonly SmokeCloud[] = [],
+): LosResultEx {
+  const direct = segmentLos(obstacles, smokes, shooter.x, shooter.y, target.x, target.y, target);
+  if (direct.visible) return { ...direct, leanX: 0, leanY: 0 };
+  const tPeeks = peekPoints(target, obstacles);
+  // target exposed at their frame — no lean needed
+  for (const [px, py] of tPeeks) {
+    const r = segmentLos(obstacles, smokes, shooter.x, shooter.y, px, py, target);
+    if (r.visible) return { visible: true, targetInCover: true, leanX: 0, leanY: 0 };
+  }
+  // shooter leans
+  for (const [px, py] of peekPoints(shooter, obstacles)) {
+    const r = segmentLos(obstacles, smokes, px, py, target.x, target.y, target);
+    if (r.visible) return { ...r, leanX: px - shooter.x, leanY: py - shooter.y };
+    // mutual lean (same-side facing doorways)
+    for (const [qx, qy] of tPeeks) {
+      const d = segmentLos(obstacles, smokes, px, py, qx, qy, target);
+      if (d.visible) return { visible: true, targetInCover: true, leanX: px - shooter.x, leanY: py - shooter.y };
+    }
+  }
+  return BLOCKED_EX;
+}
+
 export function losBetween(
   obstacles: readonly Obstacle[], shooter: LosSubject, target: LosSubject,
   smokes: readonly SmokeCloud[] = [],
 ): LosResult {
-  const direct = segmentLos(obstacles, smokes, shooter.x, shooter.y, target.x, target.y, target);
-  if (direct.visible) return direct;
-  for (const [px, py] of peekPoints(shooter, obstacles)) {
-    const r = segmentLos(obstacles, smokes, px, py, target.x, target.y, target);
-    if (r.visible) return r;
-  }
-  for (const [px, py] of peekPoints(target, obstacles)) {
-    const r = segmentLos(obstacles, smokes, shooter.x, shooter.y, px, py, target);
-    if (r.visible) return { visible: true, targetInCover: true };
-  }
-  return BLOCKED;
+  const r = losBetweenEx(obstacles, shooter, target, smokes);
+  return { visible: r.visible, targetInCover: r.targetInCover };
 }

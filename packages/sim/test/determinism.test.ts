@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blocked, computeShotPct, createState, dist, FARMSTEAD_MAP, GREYBOX_MAP,
-  hashState, losBetween, MM, rngInt, spawnSoldier, tick, WEAPONS,
+  hashState, losBetween, losBetweenEx, MM, rngInt, spawnSoldier, tick, WEAPONS,
   type Order, type OrderLog,
 } from "../src/index.js";
 
@@ -429,5 +429,56 @@ describe("frag stun-vs-kill", () => {
     }
     expect(victim.alive).toBe(true);
     expect(peak).toBeGreaterThanOrEqual(95); // pegged = pinned well past PIN_THRESHOLD
+  });
+});
+
+describe("mutual lean (facing doorways)", () => {
+  // two parallel walls with aligned door gaps (x 20..24); soldiers hug the
+  // same (east) side of each frame
+  const walls = [
+    { x: 10000, y: 20000, w: 10000, h: 400, ht: 3000, kind: "wall" as const },  // south wall, west of gap
+    { x: 24000, y: 20000, w: 16000, h: 400, ht: 3000, kind: "wall" as const },  // south wall, east of gap
+    { x: 10000, y: 9800, w: 10000, h: 400, ht: 3000, kind: "wall" as const },   // north wall, west of gap
+    { x: 24000, y: 9800, w: 16000, h: 400, ht: 3000, kind: "wall" as const },   // north wall, east of gap
+  ];
+
+  it("same-side frame huggers get LOS on each other via lean-vs-lean", () => {
+    const s = createState(61);
+    s.obstacles.push(...walls);
+    const a = spawnSoldier(s, 0, 24600, 21200); // south of south wall, east frame
+    const b = spawnSoldier(s, 1, 24600, 9200);  // north of north wall, east frame
+    const r = losBetweenEx(s.obstacles, a, b);
+    expect(r.visible).toBe(true);
+    expect(r.leanX).toBeLessThan(0); // leaned west into the gap
+    expect(r.targetInCover).toBe(true); // frame hugger reads as in cover
+    // and it is symmetric
+    expect(losBetween(s.obstacles, b, a).visible).toBe(true);
+  });
+
+  it("a body width away from the frame = safe", () => {
+    const s = createState(62);
+    s.obstacles.push(...walls);
+    const a = spawnSoldier(s, 0, 24600, 21200);
+    const safe = spawnSoldier(s, 1, 26500, 9200); // 2.5m east of the frame
+    expect(losBetween(s.obstacles, a, safe).visible).toBe(false);
+  });
+
+  it("soldiers visibly lean while engaging through a peek", () => {
+    const s = createState(63);
+    s.obstacles.push(...walls);
+    const a = spawnSoldier(s, 0, 24600, 21200, "carbine");
+    spawnSoldier(s, 1, 24600, 9200, "carbine");
+    tick(s, []);
+    expect(a.aimId).not.toBeNull();
+    expect(Math.abs(a.leanX) + Math.abs(a.leanY)).toBeGreaterThan(0);
+    // kill the duel: hold fire, lean should tuck back once no aim
+    tick(s, [
+      { type: "firemode", soldierId: 0, hold: true },
+      { type: "firemode", soldierId: 1, hold: true },
+    ]);
+    tick(s, []);
+    expect(a.aimId).toBeNull();
+    expect(a.leanX).toBe(0);
+    expect(a.leanY).toBe(0);
   });
 });

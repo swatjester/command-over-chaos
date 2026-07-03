@@ -1,6 +1,6 @@
 import { computeShotPct } from "./combat.js";
 import { GRENADES, type Boom } from "./grenades.js";
-import { losBetween } from "./los.js";
+import { losBetweenEx } from "./los.js";
 import { blocked } from "./map.js";
 import { clamp, dist, stepToward } from "./math.js";
 import type { Order } from "./orders.js";
@@ -191,10 +191,15 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   for (const s of state.soldiers) {
     if (!s.alive) {
       s.aimId = null;
+      s.leanX = 0;
+      s.leanY = 0;
       continue;
     }
-    const target = acquireTarget(state, s);
+    const acq = acquireTarget(state, s);
+    const target = acq?.target ?? null;
     s.aimId = target ? target.id : null;
+    s.leanX = acq?.leanX ?? 0;
+    s.leanY = acq?.leanY ?? 0;
     if (s.cooldown > 0) {
       s.cooldown -= 1;
       continue;
@@ -224,7 +229,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     if (target.alive) {
       target.suppression = Math.min(100, target.suppression + w.suppression);
     }
-    shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x, sy: shooter.y, tx: target.x, ty: target.y });
+    shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x + shooter.leanX, sy: shooter.y + shooter.leanY, tx: target.x + target.leanX, ty: target.y + target.leanY });
   }
 
   // 5. suppression decay
@@ -236,13 +241,18 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   return { shots, booms };
 }
 
+interface Acquisition { target: Soldier; leanX: number; leanY: number; }
+
 /** Explicit target if valid, else nearest visible enemy in weapon range (lowest id wins ties). */
-function acquireTarget(state: SimState, s: Soldier): Soldier | null {
+function acquireTarget(state: SimState, s: Soldier): Acquisition | null {
   const w = WEAPONS[s.weapon];
   if (s.targetId !== null) {
     const t = state.soldiers[s.targetId];
     if (t && t.alive) {
-      if (dist(s.x, s.y, t.x, t.y) <= w.maxRange && losBetween(state.obstacles, s, t, state.smokes).visible) return t;
+      if (dist(s.x, s.y, t.x, t.y) <= w.maxRange) {
+        const los = losBetweenEx(state.obstacles, s, t, state.smokes);
+        if (los.visible) return { target: t, leanX: los.leanX, leanY: los.leanY };
+      }
       // keep the order; they may come back into view
     } else {
       s.targetId = null;
@@ -251,14 +261,15 @@ function acquireTarget(state: SimState, s: Soldier): Soldier | null {
   }
   if (s.holdFire) return null; // hold fire: only explicit target orders engage
   // fire at will
-  let best: Soldier | null = null;
+  let best: Acquisition | null = null;
   let bestD = Infinity;
   for (const t of state.soldiers) {
     if (!t.alive || t.team === s.team) continue;
     const d = dist(s.x, s.y, t.x, t.y);
     if (d > w.maxRange || d >= bestD) continue;
-    if (!losBetween(state.obstacles, s, t, state.smokes).visible) continue;
-    best = t;
+    const los = losBetweenEx(state.obstacles, s, t, state.smokes);
+    if (!los.visible) continue;
+    best = { target: t, leanX: los.leanX, leanY: los.leanY };
     bestD = d;
   }
   return best;

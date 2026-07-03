@@ -42,6 +42,9 @@ export interface Soldier {
   smokes: number;
   /** hold fire: no auto-engagement; explicit target orders still fire */
   holdFire: boolean;
+  /** current corner-peek lean offset (mm) — visual + shot origin */
+  leanX: number;
+  leanY: number;
 }
 
 export interface SimState {
@@ -89,7 +92,7 @@ export function spawnSoldier(
     stance: "stand", moveMode: "move",
     hp: 100, suppression: 0, alive: true,
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
-    queue: [], frags: 2, smokes: 2, holdFire: false,
+    queue: [], frags: 2, smokes: 2, holdFire: false, leanX: 0, leanY: 0,
   };
   s.soldiers.push(soldier);
   return soldier;

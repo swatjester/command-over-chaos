@@ -77,6 +77,8 @@ export const SoldierSnapshotSchema = z.object({
   frags: z.number().int(),
   smokes: z.number().int(),
   holdFire: z.boolean(),
+  leanX: z.number().int(),
+  leanY: z.number().int(),
   queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 

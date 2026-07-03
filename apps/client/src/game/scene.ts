@@ -145,6 +145,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 10), bodyMat);
     head.position.y = 1.62;
     head.castShadow = true;
+    // figure subgroup leans out of cover when peeking (ring stays put)
+    const figure = new THREE.Group();
+    figure.name = "figure";
+    figure.add(body, head);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.55, 0.7, 24),
       new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide }),
@@ -152,8 +156,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.02;
     ring.name = "selection";
-    g.add(body, head, ring);
+    g.add(figure, ring);
     g.userData.bodyMat = bodyMat;
+    g.userData.lean = new THREE.Vector3(0, 0, 0);
     return g;
   }
 
@@ -177,6 +182,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
         g.position.set(s.x / 1000, 0, s.y / 1000);
       }
       g.userData.target = new THREE.Vector3(s.x / 1000, 0, s.y / 1000);
+      (g.userData.lean as THREE.Vector3).set(s.leanX / 1000, 0, s.leanY / 1000);
       const ring = g.getObjectByName("selection") as THREE.Mesh;
       (ring.material as THREE.MeshBasicMaterial).opacity = selSet.has(s.id) && s.alive ? 0.9 : 0;
       if (!s.alive && !g.userData.dead) {
@@ -410,6 +416,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     for (const g of soldierMeshes.values()) {
       const t = g.userData.target as THREE.Vector3 | undefined;
       if (t) g.position.lerp(t, Math.min(1, dt * 12));
+      const fig = g.getObjectByName("figure");
+      const lean = g.userData.lean as THREE.Vector3 | undefined;
+      if (fig && lean) fig.position.lerp(lean, Math.min(1, dt * 10)); // lean out / tuck back
     }
 
     // grenades in flight: interpolate along arc using extrapolated sim tick
