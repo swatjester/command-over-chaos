@@ -162,11 +162,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     return g;
   }
 
+  // last-known-position ghosts (the CoC red diamond): an enemy that breaks
+  // LOS leaves a marker where you last saw them, fading after a few seconds
+  const ghostMat = new THREE.MeshBasicMaterial({ color: 0xd6484f, transparent: true, opacity: 0.85 });
+  const ghosts = new Map<number, { mesh: THREE.Mesh; age: number }>();
+  const GHOST_TTL = 10; // seconds
+
   function updateSoldiers(
     soldiers: SoldierSnapshot[], mySoldierIds: number[], selectedIds: number[],
   ): void {
     mySet = new Set(mySoldierIds);
     const selSet = new Set(selectedIds);
+    const prev = lastSoldiers;
     lastSoldiers = new Map(soldiers.map((s) => [s.id, s]));
     const seen = new Set<number>();
     // rebuild queued-path lines for selected own soldiers
@@ -210,6 +217,24 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     }
     for (const [id, g] of soldierMeshes) {
       g.visible = seen.has(id) || mySet.has(id);
+    }
+    // ghost lifecycle: enemy alive last frame, gone this frame -> marker;
+    // reappears -> marker cleared
+    for (const [id, last] of prev) {
+      if (mySet.has(id) || !last.alive || seen.has(id)) continue;
+      if (!ghosts.has(id)) {
+        const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), ghostMat.clone());
+        mesh.scale.y = 0.25;
+        mesh.position.set(last.x / 1000, 0.12, last.y / 1000);
+        scene.add(mesh);
+        ghosts.set(id, { mesh, age: 0 });
+      }
+    }
+    for (const [id, gh] of ghosts) {
+      if (seen.has(id)) {
+        scene.remove(gh.mesh);
+        ghosts.delete(id);
+      }
     }
   }
 
@@ -442,6 +467,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
         tracers.splice(i, 1);
       } else {
         (tr.line.material as THREE.LineBasicMaterial).opacity = 0.9 * (tr.ttl / tr.max);
+      }
+    }
+    for (const [id, gh] of ghosts) {
+      gh.age += dt;
+      if (gh.age > GHOST_TTL) {
+        scene.remove(gh.mesh);
+        ghosts.delete(id);
+      } else {
+        const m = gh.mesh.material as THREE.MeshBasicMaterial;
+        m.opacity = gh.age < GHOST_TTL - 3 ? 0.85 : 0.85 * ((GHOST_TTL - gh.age) / 3);
+        gh.mesh.rotation.y += dt * 1.5; // slow spin reads as "stale intel"
       }
     }
     for (let i = booms.length - 1; i >= 0; i--) {
