@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // DEV ONLY (tsx): resolve workspace deps to TS source so `pnpm dev:server`
+    // works from a fresh clone with no pre-build. The production build uses
+    // tsconfig.json, which resolves the compiled packages instead.
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@coc/sim": ["../../packages/sim/src/index.ts"],
+      "@coc/protocol": ["../../packages/protocol/src/index.ts"],
+      "@coc/shared": ["../../packages/shared/src/index.ts"]
+    }
+  }
+}

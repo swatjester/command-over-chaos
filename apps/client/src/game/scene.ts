@@ -1,13 +1,12 @@
 /**
  * Three.js isometric scene — M0 greybox.
- * Orthographic camera locked to the classic iso angle; procedural map
- * (ground + cover boxes + one building shell); capsule soldiers.
- * World units: meters (sim mm / 1000).
+ * Orthographic camera at the classic iso pitch; yaw rotatable via
+ * middle-mouse drag; procedural map (ground + cover boxes + one building
+ * shell); capsule soldiers. World units: meters (sim mm / 1000).
  */
 import * as THREE from "three";
 import type { SoldierSnapshot } from "@coc/protocol";
 
-const ISO_ANGLE = Math.PI / 4; // 45° yaw
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch ≈ 35.26°
 
 export interface SceneApi {
@@ -30,6 +29,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   const camera = new THREE.OrthographicCamera();
   const camTarget = new THREE.Vector3(50, 0, 50); // map center (100m map)
   let viewSize = 40;
+  let yaw = Math.PI / 4; // camera yaw — middle-mouse drag to rotate
   function layoutCamera(): void {
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
     camera.left = -viewSize * aspect;
@@ -40,9 +40,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     camera.far = 500;
     const r = 120;
     camera.position.set(
-      camTarget.x + r * Math.cos(ISO_ANGLE),
+      camTarget.x + r * Math.cos(yaw),
       r * Math.sin(CAM_PITCH) * Math.SQRT2,
-      camTarget.z + r * Math.sin(ISO_ANGLE),
+      camTarget.z + r * Math.sin(yaw),
     );
     camera.lookAt(camTarget);
     camera.updateProjectionMatrix();
@@ -171,10 +171,33 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       if (hit) groundCb(Math.round(hit.point.x * 1000), Math.round(hit.point.z * 1000));
     }
   }
-  canvas.addEventListener("pointerdown", pick);
+  // --- input: pick, middle-drag rotate, WASD/edge pan, wheel zoom -----------
+  let rotating = false;
+  let lastRotX = 0;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button === 1) {
+      e.preventDefault(); // suppress autoscroll
+      rotating = true;
+      lastRotX = e.clientX;
+      canvas.setPointerCapture(e.pointerId);
+    } else {
+      pick(e);
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (rotating) {
+      yaw += (e.clientX - lastRotX) * 0.008;
+      lastRotX = e.clientX;
+      layoutCamera();
+    }
+  });
+  const endRotate = (e: PointerEvent): void => {
+    if (e.button === 1) rotating = false;
+  };
+  canvas.addEventListener("pointerup", endRotate);
+  canvas.addEventListener("pointercancel", endRotate);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  // --- camera controls: WASD/edge pan + wheel zoom ---------------------------
   const keys = new Set<string>();
   window.addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
@@ -191,10 +214,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, clock.getDelta());
     const pan = 30 * dt;
-    if (keys.has("w")) { camTarget.x -= pan * Math.cos(ISO_ANGLE); camTarget.z -= pan * Math.sin(ISO_ANGLE); }
-    if (keys.has("s")) { camTarget.x += pan * Math.cos(ISO_ANGLE); camTarget.z += pan * Math.sin(ISO_ANGLE); }
-    if (keys.has("a")) { camTarget.x -= pan * Math.sin(ISO_ANGLE); camTarget.z += pan * Math.cos(ISO_ANGLE); }
-    if (keys.has("d")) { camTarget.x += pan * Math.sin(ISO_ANGLE); camTarget.z -= pan * Math.cos(ISO_ANGLE); }
+    if (keys.has("w")) { camTarget.x -= pan * Math.cos(yaw); camTarget.z -= pan * Math.sin(yaw); }
+    if (keys.has("s")) { camTarget.x += pan * Math.cos(yaw); camTarget.z += pan * Math.sin(yaw); }
+    if (keys.has("a")) { camTarget.x -= pan * Math.sin(yaw); camTarget.z += pan * Math.cos(yaw); }
+    if (keys.has("d")) { camTarget.x += pan * Math.sin(yaw); camTarget.z -= pan * Math.cos(yaw); }
     layoutCamera();
 
     for (const g of soldierMeshes.values()) {

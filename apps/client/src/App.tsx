@@ -114,7 +114,7 @@ export function App(): JSX.Element {
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
         left-click: select · right-click: move order<br />
-        1–4: pick soldier · WASD: pan · wheel: zoom
+        1–4: pick soldier · WASD: pan · wheel: zoom · middle-drag: rotate
       </div>
     </div>
   );

@@ -10,4 +10,6 @@
     "dev:client": "pnpm --filter @coc/client dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "te
+    "test": "pnpm -r test"
+  }
+}
