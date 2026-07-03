@@ -5,6 +5,10 @@ import type { Stance } from "./state.js";
 export const WALL_HEIGHT = 1200;
 /** A target within this distance (mm) of intervening low cover gets the cover bonus. */
 export const COVER_NEAR = 2500;
+/** Corner peek lean distance (mm) — soldiers see around corners they hug. */
+export const PEEK_DIST = 650;
+
+export interface SmokeCloud { id: number; x: number; y: number; r: number; ttl: number; }
 
 /**
  * Exact integer 2D segment-vs-AABB test: bbox rejection + corner sign test.
@@ -26,64 +30,98 @@ export function segmentIntersectsBox(
   return true;
 }
 
-export interface SmokeCloud { id: number; x: number; y: number; r: number; ttl: number; }
-
 /**
- * Exact integer segment-vs-circle (>>6 scaling keeps all products < 2^53;
- * 64mm precision is irrelevant at smoke scale).
+ * Smoke obscures, it doesn't wall off: a sightline is blocked only if it
+ * travels MORE than one radius inside the cloud. From the edge you can see
+ * to the center; a self-smoker at the center sees out (and is seen) — smoke
+ * is concealment for crossing, not an invisibility bubble.
+ * Deterministic: +,-,*,/ and sqrt are IEEE-754 correctly rounded everywhere.
  */
-export function segmentIntersectsCircle(
-  x1: number, y1: number, x2: number, y2: number, cx: number, cy: number, r: number,
+export function smokeBlocks(
+  x1: number, y1: number, x2: number, y2: number, c: SmokeCloud,
 ): boolean {
-  if (Math.max(x1, x2) < cx - r || Math.min(x1, x2) > cx + r) return false;
-  if (Math.max(y1, y2) < cy - r || Math.min(y1, y2) > cy + r) return false;
-  const X1 = x1 >> 6, Y1 = y1 >> 6, X2 = x2 >> 6, Y2 = y2 >> 6;
-  const CX = cx >> 6, CY = cy >> 6, R = (r >> 6) + 1;
-  const dx = X2 - X1, dy = Y2 - Y1;
+  if (Math.max(x1, x2) < c.x - c.r || Math.min(x1, x2) > c.x + c.r) return false;
+  if (Math.max(y1, y2) < c.y - c.r || Math.min(y1, y2) > c.y + c.r) return false;
+  const dx = x2 - x1, dy = y2 - y1;
   const len2 = dx * dx + dy * dy;
-  const inR = (px: number, py: number): boolean => {
-    const ddx = CX - px, ddy = CY - py;
-    return ddx * ddx + ddy * ddy <= R * R;
-  };
-  if (len2 === 0) return inR(X1, Y1);
-  const tNum = (CX - X1) * dx + (CY - Y1) * dy;
-  if (tNum <= 0) return inR(X1, Y1);
-  if (tNum >= len2) return inR(X2, Y2);
-  const cross = dx * (CY - Y1) - dy * (CX - X1);
-  return cross * cross <= R * R * len2;
+  if (len2 === 0) return false;
+  const fx = c.x - x1, fy = c.y - y1;
+  const cross = dx * fy - dy * fx;
+  const R2 = c.r * c.r;
+  // line-to-center distance² = cross²/len2 ; miss if >= R²
+  if (cross * cross >= R2 * len2) return false;
+  const L = Math.sqrt(len2);
+  const proj = (fx * dx + fy * dy) / L; // distance along segment of closest approach
+  const h = Math.sqrt(R2 - (cross * cross) / len2); // half-chord
+  const entry = Math.max(0, proj - h);
+  const exit = Math.min(L, proj + h);
+  return exit - entry > c.r;
 }
 
 export interface LosSubject { x: number; y: number; stance: Stance; }
 export interface LosResult { visible: boolean; targetInCover: boolean; }
 
+const BLOCKED: LosResult = { visible: false, targetInCover: false };
+
+function pointInBox(x: number, y: number, o: Obstacle): boolean {
+  return x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h;
+}
+
 /**
- * Line of sight with cover rules:
- * - walls (ht > WALL_HEIGHT) block sight completely
- * - low cover near the TARGET: prone target is hidden; crouch/stand gets a
- *   cover bonus against shots
- * - low cover near the SHOOTER is ignored (you can see/shoot over your own
- *   cover — the defender's peek advantage, intentional for now)
+ * Single-segment LOS with cover rules (relative to the target):
+ * - walls (ht > WALL_HEIGHT) and thick smoke block
+ * - low cover near the TARGET: prone target hidden; crouch/stand = cover bonus
+ * - low cover near the SHOOTER is ignored (see/shoot over your own cover)
+ */
+function segmentLos(
+  obstacles: readonly Obstacle[], smokes: readonly SmokeCloud[],
+  x1: number, y1: number, x2: number, y2: number, target: LosSubject,
+): LosResult {
+  for (const c of smokes) {
+    if (smokeBlocks(x1, y1, x2, y2, c)) return BLOCKED;
+  }
+  let targetInCover = false;
+  for (const o of obstacles) {
+    if (!segmentIntersectsBox(x1, y1, x2, y2, o)) continue;
+    if (o.ht > WALL_HEIGHT) return BLOCKED;
+    const near =
+      target.x > o.x - COVER_NEAR && target.x < o.x + o.w + COVER_NEAR &&
+      target.y > o.y - COVER_NEAR && target.y < o.y + o.h + COVER_NEAR;
+    if (near) {
+      if (target.stance === "prone") return BLOCKED;
+      targetInCover = true;
+    }
+  }
+  return { visible: true, targetInCover };
+}
+
+function peekPoints(s: LosSubject, obstacles: readonly Obstacle[]): Array<[number, number]> {
+  const pts: Array<[number, number]> = [
+    [s.x + PEEK_DIST, s.y], [s.x - PEEK_DIST, s.y],
+    [s.x, s.y + PEEK_DIST], [s.x, s.y - PEEK_DIST],
+  ];
+  return pts.filter(([px, py]) => !obstacles.some((o) => pointInBox(px, py, o)));
+}
+
+/**
+ * LOS with CORNER PEEK (the CoC doorway rule): if the direct line is blocked,
+ * a soldier hugging a corner effectively leans PEEK_DIST to see around it —
+ * and a target hugging a corner is partially exposed (seen, but in cover).
+ * Peeking is symmetric: if A sees B via a lean, B sees A the same way.
  */
 export function losBetween(
   obstacles: readonly Obstacle[], shooter: LosSubject, target: LosSubject,
   smokes: readonly SmokeCloud[] = [],
 ): LosResult {
-  for (const c of smokes) {
-    if (segmentIntersectsCircle(shooter.x, shooter.y, target.x, target.y, c.x, c.y, c.r)) {
-      return { visible: false, targetInCover: false };
-    }
+  const direct = segmentLos(obstacles, smokes, shooter.x, shooter.y, target.x, target.y, target);
+  if (direct.visible) return direct;
+  for (const [px, py] of peekPoints(shooter, obstacles)) {
+    const r = segmentLos(obstacles, smokes, px, py, target.x, target.y, target);
+    if (r.visible) return r;
   }
-  let targetInCover = false;
-  for (const o of obstacles) {
-    if (!segmentIntersectsBox(shooter.x, shooter.y, target.x, target.y, o)) continue;
-    if (o.ht > WALL_HEIGHT) return { visible: false, targetInCover: false };
-    const near =
-      target.x > o.x - COVER_NEAR && target.x < o.x + o.w + COVER_NEAR &&
-      target.y > o.y - COVER_NEAR && target.y < o.y + o.h + COVER_NEAR;
-    if (near) {
-      if (target.stance === "prone") return { visible: false, targetInCover: false };
-      targetInCover = true;
-    }
+  for (const [px, py] of peekPoints(target, obstacles)) {
+    const r = segmentLos(obstacles, smokes, shooter.x, shooter.y, px, py, target);
+    if (r.visible) return { visible: true, targetInCover: true };
   }
-  return { visible: true, targetInCover };
+  return BLOCKED;
 }

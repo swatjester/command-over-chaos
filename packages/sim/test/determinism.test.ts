@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   blocked, computeShotPct, createState, dist, FARMSTEAD_MAP, GREYBOX_MAP,
-  hashState, MM, rngInt, spawnSoldier, tick, WEAPONS, type Order, type OrderLog,
+  hashState, losBetween, MM, rngInt, spawnSoldier, tick, WEAPONS,
+  type Order, type OrderLog,
 } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
@@ -344,8 +345,89 @@ describe("fire modes", () => {
       aShots += tick(s, []).shots.filter((e) => e.shooter === 0).length;
     }
     expect(aShots).toBeGreaterThan(0);
-    // releasing hold resumes fire at will
-    tick(s, [{ type: "target", soldierId: 0, targetId: null }, { type: "firemode", soldierId: 0, hold: false }]);
+    // toggling hold fire AGAIN must stop the explicit fire order too
+    tick(s, [{ type: "firemode", soldierId: 0, hold: true }]);
+    expect(a.targetId).toBeNull();
+    let after = 0;
+    for (let i = 0; i < 60; i++) after += tick(s, []).shots.length;
+    expect(after).toBe(0);
+    tick(s, [{ type: "firemode", soldierId: 0, hold: false }]);
     expect(a.holdFire).toBe(false);
+  });
+});
+
+describe("corner peek", () => {
+  const wall = { x: 20000, y: 19800, w: 10000, h: 400, ht: 3000, kind: "wall" as const };
+
+  it("soldier hugging a wall end sees around the corner (and is seen)", () => {
+    const s = createState(51);
+    s.obstacles.push(wall);
+    const peeker = spawnSoldier(s, 0, 20500, 21000); // south side, at west end
+    const open = spawnSoldier(s, 1, 20500, 15000);   // north side, across the wall line
+    expect(losBetween(s.obstacles, peeker, open).visible).toBe(true);
+    // symmetric: the open soldier sees the peeker too, but peeker counts as in cover
+    const back = losBetween(s.obstacles, open, peeker);
+    expect(back.visible).toBe(true);
+  });
+
+  it("mid-wall provides no peek", () => {
+    const s = createState(52);
+    s.obstacles.push(wall);
+    const a = spawnSoldier(s, 0, 25000, 21000); // dead center of the wall, south
+    const b = spawnSoldier(s, 1, 25000, 15000); // north
+    expect(losBetween(s.obstacles, a, b).visible).toBe(false);
+  });
+});
+
+describe("smoke edge visibility", () => {
+  it("sightlines up to one radius inside smoke survive; cross-cloud is blocked", () => {
+    const s = createState(53);
+    const center = spawnSoldier(s, 0, 10 * MM, 25 * MM); // self-smoked at cloud center
+    const nearEdge = spawnSoldier(s, 1, 10 * MM, 31 * MM); // 6m away, past the 5m edge
+    const farSide = spawnSoldier(s, 1, 10 * MM, 18 * MM);
+    const beyond = spawnSoldier(s, 1, 10 * MM, 45 * MM);
+    s.smokes.push({ id: 1, x: 10 * MM, y: 25 * MM, r: 5000, ttl: 100 });
+    // center soldier travels exactly one radius of smoke: visible both ways
+    expect(losBetween(s.obstacles, center, nearEdge, s.smokes).visible).toBe(true);
+    expect(losBetween(s.obstacles, nearEdge, center, s.smokes).visible).toBe(true);
+    // no self-smoke invisibility even at long range (path inside = 1 radius)
+    expect(losBetween(s.obstacles, beyond, center, s.smokes).visible).toBe(true);
+    // but a line crossing the whole cloud (2 radii inside) is blocked
+    expect(losBetween(s.obstacles, farSide, beyond, s.smokes).visible).toBe(false);
+  });
+});
+
+describe("frag stun-vs-kill", () => {
+  it("adjacent detonation kills; standoff detonation stuns", () => {
+    const s = createState(54);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    const adjacent = spawnSoldier(s, 1, 10 * MM, 30500); // 0.5m from blast
+    const standoff = spawnSoldier(s, 1, 10 * MM, 34 * MM); // 4m from blast
+    // isolate the frag: thrower holds fire
+    tick(s, [
+      { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 30 * MM },
+      { type: "firemode", soldierId: 0, hold: true },
+    ]);
+    for (let i = 0; i < 120; i++) tick(s, []);
+    expect(adjacent.alive).toBe(false);              // 95->55 zone
+    expect(standoff.alive).toBe(true);               // light frag damage only
+    expect(standoff.hp).toBeGreaterThan(70);
+  });
+
+  it("stun pins soldiers near the blast", () => {
+    const s = createState(55);
+    spawnSoldier(s, 0, 10 * MM, 10 * MM, "carbine");
+    const victim = spawnSoldier(s, 1, 10 * MM, 33 * MM); // 3m: stun radius
+    tick(s, [
+      { type: "throw", soldierId: 0, kind: "frag", x: 10 * MM, y: 30 * MM },
+      { type: "firemode", soldierId: 0, hold: true },
+    ]);
+    let peak = 0;
+    for (let i = 0; i < 120; i++) {
+      tick(s, []);
+      peak = Math.max(peak, victim.suppression);
+    }
+    expect(victim.alive).toBe(true);
+    expect(peak).toBeGreaterThanOrEqual(95); // pegged = pinned well past PIN_THRESHOLD
   });
 });

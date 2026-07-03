@@ -87,6 +87,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       }
       case "firemode":
         s.holdFire = o.hold;
+        if (o.hold) s.targetId = null; // hold fire means STOP: clears fire orders
         break;
       case "halt":
         s.tx = null;
@@ -149,18 +150,26 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       for (const s of state.soldiers) {
         if (!s.alive) continue;
         const d = dist(s.x, s.y, g.x, g.y);
-        if (d <= def.radius) {
-          s.hp -= def.maxDamage - Math.floor(((def.maxDamage - def.minDamage) * d) / def.radius);
-          if (s.hp <= 0) {
-            s.hp = 0;
-            s.alive = false;
-            s.tx = null;
-            s.ty = null;
-            s.queue = [];
-          }
+        // adjacent = lethal; fragmentation zone = light damage (stun does the work)
+        if (d <= def.innerRadius) {
+          s.hp -= def.innerMax - Math.floor(((def.innerMax - def.innerMin) * d) / def.innerRadius);
+        } else if (d <= def.outerRadius) {
+          s.hp -= def.outerMax - Math.floor(((def.outerMax - def.outerMin) * (d - def.innerRadius)) / (def.outerRadius - def.innerRadius));
         }
-        if (s.alive && d <= def.suppressRadius) {
-          s.suppression = Math.min(100, s.suppression + def.suppression - Math.floor((20 * d) / def.suppressRadius));
+        if (s.hp <= 0) {
+          s.hp = 0;
+          s.alive = false;
+          s.tx = null;
+          s.ty = null;
+          s.queue = [];
+          continue;
+        }
+        // stun: pegged suppression inside stunRadius, shaken falloff beyond
+        if (d <= def.stunRadius) {
+          s.suppression = 100;
+        } else if (d <= def.suppressRadius) {
+          const add = 70 - Math.floor((30 * (d - def.stunRadius)) / (def.suppressRadius - def.stunRadius));
+          s.suppression = Math.min(100, s.suppression + add);
         }
       }
       booms.push({ x: g.x, y: g.y, kind: "frag" });
