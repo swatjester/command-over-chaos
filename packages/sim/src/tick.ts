@@ -75,23 +75,34 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
 
   // 3. combat — id order for determinism; simultaneous within a tick
   //    (a soldier killed this tick may still get their queued shot off)
+  // Two-phase resolution: all shots roll against PRE-damage state, then
+  // effects apply. Fire within a tick is simultaneous — no id-order advantage,
+  // and mutual kills are possible (as they should be).
   const events: ShotEvent[] = [];
+  const resolved: Array<{ shooter: Soldier; target: Soldier; hit: boolean }> = [];
   for (const s of state.soldiers) {
-    if (!s.alive) continue;
+    if (!s.alive) {
+      s.aimId = null;
+      continue;
+    }
+    const target = acquireTarget(state, s);
+    s.aimId = target ? target.id : null;
     if (s.cooldown > 0) {
       s.cooldown -= 1;
       continue;
     }
-    const target = acquireTarget(state, s);
     if (!target) continue;
     const shot = computeShotPct(state.obstacles, s, target);
     if (shot.pct <= 0) continue;
-    const w = WEAPONS[s.weapon];
     let roll: number;
     [roll, state.rng] = rngInt(state.rng, 100);
-    const hit = roll < shot.pct;
+    s.cooldown = WEAPONS[s.weapon].cooldown;
+    resolved.push({ shooter: s, target, hit: roll < shot.pct });
+  }
+  for (const { shooter, target, hit } of resolved) {
+    const w = WEAPONS[shooter.weapon];
     let kill = false;
-    if (hit) {
+    if (hit && target.hp > 0) {
       target.hp -= w.damage;
       if (target.hp <= 0) {
         target.hp = 0;
@@ -101,12 +112,10 @@ export function tick(state: SimState, orders: readonly Order[]): ShotEvent[] {
         kill = true;
       }
     }
-    // fire suppresses the target area, hit or miss
     if (target.alive) {
       target.suppression = Math.min(100, target.suppression + w.suppression);
     }
-    s.cooldown = w.cooldown;
-    events.push({ shooter: s.id, target: target.id, hit, kill, sx: s.x, sy: s.y, tx: target.x, ty: target.y });
+    events.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x, sy: shooter.y, tx: target.x, ty: target.y });
   }
 
   // 4. suppression decay

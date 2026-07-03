@@ -6,7 +6,7 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  createState, GREYBOX_MAP, hashState, losBetween, MM, spawnSoldier, tick,
+  ACTIVE_MAP, createState, hashState, losBetween, MM, spawnSoldier, tick,
   TICK_MS, TICK_RATE, type Order, type ShotEvent, type Soldier, type WeaponId,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
@@ -15,7 +15,7 @@ import { DEFAULT_SERVER_PORT } from "@coc/shared";
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const FIRETEAM_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
 
-const state = createState(Date.now() >>> 0, GREYBOX_MAP);
+const state = createState(Date.now() >>> 0, ACTIVE_MAP);
 const pendingOrders: Order[] = [];
 let pendingEvents: ShotEvent[] = [];
 
@@ -33,10 +33,10 @@ console.log(`[coc] match server on :${PORT}, tick ${TICK_RATE}Hz`);
 
 wss.on("connection", (ws) => {
   const team = (nextPlayerNum % 2) as 0 | 1;
-  const spawnY = team === 0 ? 10 * MM : 90 * MM;
-  const baseX = 30 * MM + Math.floor(nextPlayerNum / 2) * (15 * MM);
+  const anchors = ACTIVE_MAP.spawns[team];
+  const [ax, ay] = anchors[Math.floor(nextPlayerNum / 2) % anchors.length]!;
   const soldierIds = FIRETEAM_WEAPONS.map((weapon, i) => {
-    return spawnSoldier(state, team, baseX + i * (3 * MM), spawnY, weapon).id;
+    return spawnSoldier(state, team, ax + Math.round((i - 1.5) * 3 * MM), ay, weapon).id;
   });
   const player: Player = { id: `p${nextPlayerNum++}`, team, soldierIds, ws };
   players.set(ws, player);

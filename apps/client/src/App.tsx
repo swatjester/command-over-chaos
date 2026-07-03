@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
-import { computeShotPct, GREYBOX_MAP, WEAPONS, type Stance } from "@coc/sim";
+import { ACTIVE_MAP, computeShotPct, WEAPONS, type Stance } from "@coc/sim";
 import { GAME_NAME } from "@coc/shared";
 import { connect, type Connection } from "./game/net.js";
 import { createScene, type SceneApi } from "./game/scene.js";
@@ -73,7 +73,7 @@ export function App(): JSX.Element {
   const shooter = selected !== null ? byId.get(selected) : undefined;
   const hoverTarget = hover ? byId.get(hover.id) : undefined;
   const shot = shooter?.alive && hoverTarget
-    ? computeShotPct(GREYBOX_MAP.obstacles, shooter, hoverTarget)
+    ? computeShotPct(ACTIVE_MAP.obstacles, shooter, hoverTarget)
     : null;
 
   return (
@@ -142,9 +142,9 @@ export function App(): JSX.Element {
               opacity: s.alive ? 1 : 0.6,
             }}
           >
-            <div style={{ fontSize: 11, opacity: 0.6, display: "flex", justifyContent: "space-between" }}>
-              <span>[{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}</span>
-              {!s.alive && <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>}
+            <div style={{ fontSize: 11, opacity: 0.75, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ opacity: 0.8 }}>[{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}</span>
+              {s.alive ? <StanceIcon stance={s.stance} /> : <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>}
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
               HP <Bar value={s.hp} color="#5fd68a" />
@@ -152,9 +152,10 @@ export function App(): JSX.Element {
             <div style={{ fontSize: 12 }}>
               SUP <Bar value={s.suppression} color="#e66a5a" />
             </div>
-            <div style={{ fontSize: 10, opacity: 0.6, marginTop: 3 }}>
+            <AimLine s={s} byId={byId} />
+            <div style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>
               {s.alive
-                ? `${s.stance} · ${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`
+                ? `${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`
                 : "—"}
             </div>
           </button>
@@ -171,6 +172,52 @@ export function App(): JSX.Element {
         1–4: pick soldier · WASD: pan · wheel: zoom · middle-drag: rotate
       </div>
     </div>
+  );
+}
+
+function AimLine({ s, byId }: { s: SoldierSnapshot; byId: Map<number, SoldierSnapshot> }): JSX.Element {
+  if (!s.alive) return <div style={{ fontSize: 10, height: 14 }} />;
+  const target = s.aimId !== null ? byId.get(s.aimId) : undefined;
+  if (target) {
+    const shot = computeShotPct(ACTIVE_MAP.obstacles, s, target);
+    const color = shot.pct >= 60 ? "#5fd68a" : shot.pct >= 30 ? "#e6b45a" : "#e66a5a";
+    return (
+      <div style={{ fontSize: 11, marginTop: 3, height: 14 }}>
+        <span style={{ opacity: 0.55 }}>aim </span>
+        <span style={{ color, fontWeight: 800 }}>{shot.pct}%</span>
+        <span style={{ opacity: 0.55 }}> → {WEAPONS[target.weapon].name} #{target.id}</span>
+      </div>
+    );
+  }
+  if (s.targetId !== null) {
+    return <div style={{ fontSize: 10, marginTop: 3, height: 14, color: "#e6b45a" }}>target held · no LOS</div>;
+  }
+  return <div style={{ fontSize: 10, marginTop: 3, height: 14, opacity: 0.35 }}>no target</div>;
+}
+
+function StanceIcon({ stance }: { stance: Stance }): JSX.Element {
+  const c = "#9fb4c8";
+  if (stance === "prone") {
+    return (
+      <svg width="16" height="14" viewBox="0 0 16 14" aria-label="prone">
+        <circle cx="2.8" cy="10.5" r="2" fill={c} />
+        <path d="M5.5 10.5 H15" stroke={c} strokeWidth="2.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (stance === "crouch") {
+    return (
+      <svg width="16" height="14" viewBox="0 0 16 14" aria-label="crouch">
+        <circle cx="10.5" cy="2.8" r="2" fill={c} />
+        <path d="M10 5 L6.5 8.5 L9.5 12 M6.5 8.5 L3.5 12" stroke={c} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" aria-label="standing">
+      <circle cx="8" cy="2.5" r="2" fill={c} />
+      <path d="M8 4.5 V9 M8 9 L5.8 13.5 M8 9 L10.2 13.5 M8 5.5 L5.5 8 M8 5.5 L10.5 8" stroke={c} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+    </svg>
   );
 }
 

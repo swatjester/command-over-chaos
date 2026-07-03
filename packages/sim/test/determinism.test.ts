@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  blocked, computeShotPct, createState, GREYBOX_MAP, hashState, MM, rngInt,
-  spawnSoldier, tick, type Order, type OrderLog,
+  blocked, computeShotPct, createState, dist, FARMSTEAD_MAP, GREYBOX_MAP,
+  hashState, MM, rngInt, spawnSoldier, tick, WEAPONS, type Order, type OrderLog,
 } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
@@ -178,5 +178,42 @@ describe("combat", () => {
       expect(events.length).toBe(0); // no valid targets for a; b never fires
     }
     expect(a.alive).toBe(true);
+  });
+});
+
+describe("farmstead map", () => {
+  it("spawn anchors are clear of obstacles", () => {
+    for (const team of [0, 1] as const) {
+      for (const [x, y] of FARMSTEAD_MAP.spawns[team]) {
+        expect(blocked(FARMSTEAD_MAP.obstacles, x, y)).toBe(false);
+      }
+    }
+  });
+
+  it("no spawn anchor is within weapon range of any enemy anchor", () => {
+    const maxRange = Math.max(...Object.values(WEAPONS).map((w) => w.maxRange));
+    for (const [ax, ay] of FARMSTEAD_MAP.spawns[0]) {
+      for (const [bx, by] of FARMSTEAD_MAP.spawns[1]) {
+        expect(dist(ax, ay, bx, by)).toBeGreaterThan(maxRange);
+      }
+    }
+  });
+
+  it("obstacles stay inside map bounds", () => {
+    for (const o of FARMSTEAD_MAP.obstacles) {
+      expect(o.x).toBeGreaterThanOrEqual(0);
+      expect(o.y).toBeGreaterThanOrEqual(0);
+      expect(o.x + o.w).toBeLessThanOrEqual(FARMSTEAD_MAP.w);
+      expect(o.y + o.h).toBeLessThanOrEqual(FARMSTEAD_MAP.h);
+    }
+  });
+
+  it("buildings are enterable (door gaps wide enough for soldier radius)", () => {
+    // maison south door centered (75, 35), church north door (75, 110)
+    expect(blocked(FARMSTEAD_MAP.obstacles, 75 * MM, 35 * MM)).toBe(false);
+    expect(blocked(FARMSTEAD_MAP.obstacles, 75 * MM, 110 * MM)).toBe(false);
+    // courtyard west/east gaps at (75±7, 75)
+    expect(blocked(FARMSTEAD_MAP.obstacles, 68 * MM, 75 * MM)).toBe(false);
+    expect(blocked(FARMSTEAD_MAP.obstacles, 82 * MM, 75 * MM)).toBe(false);
   });
 });

@@ -6,7 +6,7 @@
  */
 import * as THREE from "three";
 import type { ShotEvent, SoldierSnapshot } from "@coc/protocol";
-import { GREYBOX_MAP } from "@coc/sim";
+import { ACTIVE_MAP } from "@coc/sim";
 
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch ≈ 35.26°
 
@@ -30,9 +30,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   scene.fog = new THREE.Fog(0x11151a, 120, 260);
 
   // --- camera -------------------------------------------------------------
+  const MAP_W = ACTIVE_MAP.w / 1000;
+  const MAP_H = ACTIVE_MAP.h / 1000;
   const camera = new THREE.OrthographicCamera();
-  const camTarget = new THREE.Vector3(50, 0, 50); // map center (100m map)
-  let viewSize = 40;
+  const camTarget = new THREE.Vector3(MAP_W / 2, 0, MAP_H / 2);
+  let viewSize = 55;
   let yaw = Math.PI / 4; // camera yaw — middle-mouse drag to rotate
   function layoutCamera(): void {
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
@@ -64,28 +66,44 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
 
   // --- map from sim data (what you see is what collides) --------------------
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(100, 100),
-    new THREE.MeshStandardMaterial({ color: 0x39413b, roughness: 0.95 }),
+    new THREE.PlaneGeometry(MAP_W, MAP_H),
+    new THREE.MeshStandardMaterial({ color: 0x445142, roughness: 0.95 }),
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(50, 0, 50);
+  ground.position.set(MAP_W / 2, 0, MAP_H / 2);
   ground.receiveShadow = true;
   ground.name = "ground";
   scene.add(ground);
 
-  const grid = new THREE.GridHelper(100, 20, 0x2a3138, 0x232a30);
-  grid.position.set(50, 0.01, 50);
+  const grid = new THREE.GridHelper(Math.max(MAP_W, MAP_H), Math.max(MAP_W, MAP_H) / 5, 0x2a3138, 0x232a30);
+  grid.position.set(MAP_W / 2, 0.01, MAP_H / 2);
   scene.add(grid);
 
-  const coverMat = new THREE.MeshStandardMaterial({ color: 0x555d66, roughness: 0.8 });
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x6e6a60, roughness: 0.9 });
-  for (const o of GREYBOX_MAP.obstacles) {
+  const KIND_MATS = {
+    wall: new THREE.MeshStandardMaterial({ color: 0x8a7f6a, roughness: 0.9 }),
+    stone: new THREE.MeshStandardMaterial({ color: 0x8d939a, roughness: 0.85 }),
+    hay: new THREE.MeshStandardMaterial({ color: 0xc2a24e, roughness: 1.0 }),
+    fence: new THREE.MeshStandardMaterial({ color: 0x6d5136, roughness: 0.95 }),
+    shed: new THREE.MeshStandardMaterial({ color: 0x5f5648, roughness: 0.9 }),
+    trunk: new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1.0 }),
+    leaf: new THREE.MeshStandardMaterial({ color: 0x3e5f34, roughness: 1.0 }),
+  } as const;
+  for (const o of ACTIVE_MAP.obstacles) {
     const w = o.w / 1000, d = o.h / 1000, ht = o.ht / 1000;
-    const m = new THREE.Mesh(
-      new THREE.BoxGeometry(w, ht, d),
-      o.ht <= 1200 ? coverMat : wallMat,
-    );
-    m.position.set(o.x / 1000 + w / 2, ht / 2, o.y / 1000 + d / 2);
+    const cx = o.x / 1000 + w / 2, cz = o.y / 1000 + d / 2;
+    if (o.kind === "tree") {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 2.2, 8), KIND_MATS.trunk);
+      trunk.position.set(cx, 1.1, cz);
+      trunk.castShadow = true;
+      const leaves = new THREE.Mesh(new THREE.SphereGeometry(1.7, 10, 8), KIND_MATS.leaf);
+      leaves.position.set(cx, 3.1, cz);
+      leaves.scale.y = 0.85;
+      leaves.castShadow = true;
+      scene.add(trunk, leaves);
+      continue;
+    }
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), KIND_MATS[o.kind]);
+    m.position.set(cx, ht / 2, cz);
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
@@ -260,7 +278,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   window.addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
   canvas.addEventListener("wheel", (e) => {
-    viewSize = Math.min(70, Math.max(12, viewSize + Math.sign(e.deltaY) * 3));
+    viewSize = Math.min(95, Math.max(12, viewSize + Math.sign(e.deltaY) * 4));
     layoutCamera();
   }, { passive: true });
 

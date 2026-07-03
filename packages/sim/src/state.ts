@@ -30,6 +30,8 @@ export interface Soldier {
   cooldown: number;
   /** explicit fire order target; null = fire at will */
   targetId: number | null;
+  /** who this soldier is currently aiming at (server-computed each tick) */
+  aimId: number | null;
 }
 
 export interface SimState {
@@ -70,7 +72,7 @@ export function spawnSoldier(
     team, x, y, tx: null, ty: null,
     stance: "stand", moveMode: "move",
     hp: 100, suppression: 0, alive: true,
-    weapon, cooldown: 0, targetId: null,
+    weapon, cooldown: 0, targetId: null, aimId: null,
   };
   s.soldiers.push(soldier);
   return soldier;

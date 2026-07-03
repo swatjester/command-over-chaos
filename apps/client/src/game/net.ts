@@ -4,7 +4,7 @@
  * client is always demoable. Offline mode has no fog: you see both teams.
  */
 import {
-  createState, GREYBOX_MAP, MM, spawnSoldier, tick, TICK_MS,
+  ACTIVE_MAP, createState, MM, spawnSoldier, tick, TICK_MS,
   type Order, type ShotEvent, type SimState, type WeaponId,
 } from "@coc/sim";
 import { ServerMsgSchema, type ClientMsg, type SoldierSnapshot } from "@coc/protocol";
@@ -54,9 +54,10 @@ export function connect(url = "ws://localhost:8787"): Promise<Connection> {
 const OFFLINE_WEAPONS: WeaponId[] = ["carbine", "lmg", "dmr", "smg"];
 
 function offline(): Connection {
-  const state: SimState = createState(20260702, GREYBOX_MAP);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (40 + i * 3) * MM, 20 * MM, OFFLINE_WEAPONS[i]);
-  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (40 + i * 3) * MM, 80 * MM, OFFLINE_WEAPONS[i]);
+  const state: SimState = createState(20260702, ACTIVE_MAP);
+  // offline demo: two fireteams face off across the central courtyard
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, OFFLINE_WEAPONS[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, OFFLINE_WEAPONS[i]);
   let pending: Order[] = [];
   let snapshotCb: SnapshotCb | null = null;
 

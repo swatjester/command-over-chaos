@@ -52,6 +52,8 @@ export const SoldierSnapshotSchema = z.object({
   suppression: z.number().int(),
   alive: z.boolean(),
   weapon: WeaponIdSchema,
+  targetId: z.number().int().nullable(),
+  aimId: z.number().int().nullable(),
 });
 
 export const ShotEventSchema = z.object({

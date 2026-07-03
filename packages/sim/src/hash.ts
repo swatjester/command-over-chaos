@@ -29,6 +29,7 @@ export function hashState(state: SimState): number {
     mix(WEAPON_IDS.indexOf(s.weapon));
     mix(s.cooldown);
     mix(s.targetId ?? -1);
+    mix(s.aimId ?? -1);
   }
   return h >>> 0;
 }
