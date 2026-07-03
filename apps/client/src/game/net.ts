@@ -4,7 +4,7 @@
  * client is always demoable.
  */
 import {
-  createState, MM, spawnSoldier, tick, TICK_MS, type Order, type SimState,
+  createState, GREYBOX_MAP, MM, spawnSoldier, tick, TICK_MS, type Order, type SimState,
 } from "@coc/sim";
 import { ServerMsgSchema, type ClientMsg, type SoldierSnapshot } from "@coc/protocol";
 
@@ -49,7 +49,7 @@ export function connect(url = "ws://localhost:8787"): Promise<Connection> {
 }
 
 function offline(): Connection {
-  const state: SimState = createState(20260702);
+  const state: SimState = createState(20260702, GREYBOX_MAP);
   for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (40 + i * 3) * MM, 20 * MM);
   for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (40 + i * 3) * MM, 80 * MM);
   let pending: Order[] = [];

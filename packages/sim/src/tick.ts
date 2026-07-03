@@ -1,3 +1,4 @@
+import { blocked } from "./map.js";
 import { clamp, stepToward } from "./math.js";
 import type { Order } from "./orders.js";
 import { MOVE_SPEED, type SimState } from "./state.js";
@@ -29,14 +30,25 @@ export function tick(state: SimState, orders: readonly Order[]): void {
     }
   }
 
-  // 2. movement
+  // 2. movement with AABB collision + wall slide
+  //    (no pathfinding yet — soldiers slide along walls; navmesh lands in M2)
   for (const s of state.soldiers) {
     if (!s.alive || s.tx === null || s.ty === null) continue;
     const speed = MOVE_SPEED[s.moveMode];
     const [nx, ny, arrived] = stepToward(s.x, s.y, s.tx, s.ty, speed);
-    s.x = nx;
-    s.y = ny;
-    if (arrived) {
+    if (!blocked(state.obstacles, nx, ny)) {
+      s.x = nx;
+      s.y = ny;
+      if (arrived) {
+        s.tx = null;
+        s.ty = null;
+      }
+    } else if (nx !== s.x && !blocked(state.obstacles, nx, s.y)) {
+      s.x = nx; // slide along y-facing wall
+    } else if (ny !== s.y && !blocked(state.obstacles, s.x, ny)) {
+      s.y = ny; // slide along x-facing wall
+    } else {
+      // fully wedged (e.g., target inside an obstacle): stop cleanly
       s.tx = null;
       s.ty = null;
     }

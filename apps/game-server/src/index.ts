@@ -5,14 +5,14 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  createState, hashState, MM, spawnSoldier, tick, TICK_MS, TICK_RATE, type Order,
+  createState, GREYBOX_MAP, hashState, MM, spawnSoldier, tick, TICK_MS, TICK_RATE, type Order,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
 import { DEFAULT_SERVER_PORT } from "@coc/shared";
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 
-const state = createState(Date.now() >>> 0);
+const state = createState(Date.now() >>> 0, GREYBOX_MAP);
 const pendingOrders: Order[] = [];
 
 interface Player {

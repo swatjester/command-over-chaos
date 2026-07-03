@@ -6,6 +6,7 @@
  */
 import * as THREE from "three";
 import type { SoldierSnapshot } from "@coc/protocol";
+import { GREYBOX_MAP } from "@coc/sim";
 
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch ≈ 35.26°
 
@@ -73,25 +74,20 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   grid.position.set(50, 0.01, 50);
   scene.add(grid);
 
+  // obstacles come straight from sim map data — what you see is what collides
   const coverMat = new THREE.MeshStandardMaterial({ color: 0x555d66, roughness: 0.8 });
   const wallMat = new THREE.MeshStandardMaterial({ color: 0x6e6a60, roughness: 0.9 });
-  function box(w: number, h: number, d: number, x: number, z: number, mat: THREE.Material): void {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.set(x, h / 2, z);
+  for (const o of GREYBOX_MAP.obstacles) {
+    const w = o.w / 1000, d = o.h / 1000, ht = o.ht / 1000;
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w, ht, d),
+      o.ht <= 1200 ? coverMat : wallMat,
+    );
+    m.position.set(o.x / 1000 + w / 2, ht / 2, o.y / 1000 + d / 2);
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
   }
-  // scattered low cover
-  const coverSpots: Array<[number, number]> = [
-    [20, 30], [25, 55], [40, 42], [55, 30], [62, 60], [75, 45], [35, 70], [70, 75], [50, 15], [50, 85],
-  ];
-  for (const [x, z] of coverSpots) box(2.4, 1.1, 1.2, x, z, coverMat);
-  // central building shell (walls with a doorway gap)
-  box(12, 3, 0.4, 50, 44, wallMat);
-  box(0.4, 3, 5, 44.2, 47.3, wallMat);
-  box(0.4, 3, 12, 56, 50, wallMat);
-  box(9, 3, 0.4, 48.4, 56, wallMat);
 
   // --- soldiers -------------------------------------------------------------
   const soldierGroup = new THREE.Group();

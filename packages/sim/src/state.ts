@@ -1,3 +1,4 @@
+import type { MapDef, Obstacle } from "./map.js";
 import { MM } from "./math.js";
 
 export const TICK_RATE = 30; // Hz
@@ -28,6 +29,7 @@ export interface SimState {
   rng: number; // PRNG state
   mapW: number; // mm
   mapH: number; // mm
+  obstacles: Obstacle[]; // static collision geometry
   soldiers: Soldier[];
 }
 
@@ -39,8 +41,16 @@ export const MOVE_SPEED: Record<MoveMode, number> = {
   crawl: Math.floor((0.7 * MM) / TICK_RATE),
 };
 
-export function createState(seed: number, mapW = 100 * MM, mapH = 100 * MM): SimState {
-  return { tick: 0, seed, rng: seed >>> 0, mapW, mapH, soldiers: [] };
+export function createState(seed: number, map?: MapDef): SimState {
+  return {
+    tick: 0,
+    seed,
+    rng: seed >>> 0,
+    mapW: map?.w ?? 100 * MM,
+    mapH: map?.h ?? 100 * MM,
+    obstacles: map?.obstacles ?? [],
+    soldiers: [],
+  };
 }
 
 export function spawnSoldier(s: SimState, team: 0 | 1, x: number, y: number): Soldier {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  createState, hashState, MM, rngInt, spawnSoldier, tick, type Order, type OrderLog,
+  blocked, createState, GREYBOX_MAP, hashState, MM, rngInt, spawnSoldier, tick,
+  type Order, type OrderLog,
 } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
@@ -74,5 +75,41 @@ describe("sim determinism", () => {
     for (let i = 0; i < 2000; i++) tick(s, []);
     expect(s.soldiers[0]!.x).toBe(0);
     expect(s.soldiers[0]!.tx).toBeNull();
+  });
+});
+
+describe("collision", () => {
+  it("soldiers cannot pass through or end up inside walls", () => {
+    const s = createState(5, GREYBOX_MAP);
+    spawnSoldier(s, 0, 50 * MM, 38 * MM); // north of the building's north wall
+    tick(s, [{ type: "move", soldierId: 0, x: 50 * MM, y: 50 * MM, mode: "sprint" }]);
+    for (let i = 0; i < 600; i++) tick(s, []);
+    const sol = s.soldiers[0]!;
+    expect(blocked(s.obstacles, sol.x, sol.y)).toBe(false);
+    expect(sol.y).toBeLessThan(44 * MM); // never crossed the wall line
+  });
+
+  it("target inside an obstacle stops cleanly (no wedge loop)", () => {
+    const s = createState(6, GREYBOX_MAP);
+    spawnSoldier(s, 0, 20 * MM, 27 * MM);
+    tick(s, [{ type: "move", soldierId: 0, x: 20 * MM, y: 30 * MM, mode: "move" }]); // cover box center
+    for (let i = 0; i < 400; i++) tick(s, []);
+    const sol = s.soldiers[0]!;
+    expect(sol.tx).toBeNull(); // order cleared, not stuck "moving" forever
+    expect(blocked(s.obstacles, sol.x, sol.y)).toBe(false);
+  });
+
+  it("collision resolution is deterministic", () => {
+    const run = (): number => {
+      const s = createState(77, GREYBOX_MAP);
+      for (let i = 0; i < 8; i++) spawnSoldier(s, i < 4 ? 0 : 1, (44 + i) * MM, (i < 4 ? 40 : 60) * MM);
+      // everyone charges through the building
+      tick(s, s.soldiers.map((sol) => ({
+        type: "move" as const, soldierId: sol.id, x: 50 * MM, y: sol.team === 0 ? 60 * MM : 40 * MM, mode: "sprint" as const,
+      })));
+      for (let i = 0; i < 1200; i++) tick(s, []);
+      return hashState(s);
+    };
+    expect(run()).toBe(run());
   });
 });
