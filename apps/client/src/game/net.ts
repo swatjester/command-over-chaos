@@ -31,11 +31,13 @@ export interface Connection {
   close(): void;
 }
 
+// sessionStorage (not localStorage): per-tab, so each window is its own
+// player, but survives F5 so refresh still reclaims the squad (I-001).
 function sessionToken(): string {
-  let t = localStorage.getItem("coc-token");
+  let t = sessionStorage.getItem("coc-token");
   if (!t) {
     t = crypto.randomUUID();
-    localStorage.setItem("coc-token", t);
+    sessionStorage.setItem("coc-token", t);
   }
   return t;
 }
