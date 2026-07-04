@@ -151,9 +151,9 @@ function farmstead(): MapDef {
     o(86, 64.75, 12, 0.5, 1.1, "stone"), o(86, 84.75, 12, 0.5, 1.1, "stone"),
   );
 
-  // === WEST + EAST FIELDS (mirrored E/W and N/S) ============================
-  for (const mx of [0, 1]) { // 0 = west, 1 = east (mirror x -> 150 - x - w)
-    const fx = (x: number, w: number): number => (mx === 0 ? x : 150 - x - w);
+  // === EAST FIELD (walls/hay/fences, mirrored N/S) ==========================
+  {
+    const fx = (x: number, w: number): number => 150 - x - w;
     obs.push(
       o(fx(20, 20), 54.75, 20, 0.5, 1.1, "stone"),
       o(fx(20, 20), 94.75, 20, 0.5, 1.1, "stone"),
@@ -167,6 +167,34 @@ function farmstead(): MapDef {
       o(fx(8, 14), 94.7, 14, 0.3, 0.9, "fence"),
     );
   }
+
+  // === WEST FIELD ===========================================================
+  // North half: THE BARN — 14x24m open interior, no windows, big doors on the
+  // short N/S ends (facing the spawns), one offset interior wall cutting the
+  // door-to-door sightline (passage stays open on the east side).
+  obs.push(
+    o(19, 49.75, 5, 0.5, 3, "shed"),   // north end, west of door (24..28)
+    o(28, 49.75, 5, 0.5, 3, "shed"),
+    o(19, 73.75, 5, 0.5, 3, "shed"),   // south end, west of door (24..28)
+    o(28, 73.75, 5, 0.5, 3, "shed"),
+    o(18.75, 50, 0.5, 24, 3, "shed"),  // west long wall
+    o(32.75, 50, 0.5, 24, 3, "shed"),  // east long wall
+    o(19, 61.75, 11, 0.5, 3, "shed"),  // interior LOS cut, gap 30..33
+  );
+  // South half: open hay field (the barn's counterpart stays field, more hay)
+  obs.push(
+    o(20, 94.75, 20, 0.5, 1.1, "stone"),
+    o(14, 38, 5, 4, 3, "shed"),
+    o(14, 108, 5, 4, 3, "shed"),
+    o(23, 79, 2, 2, 1.1, "hay"),
+    o(20, 82.5, 2, 2, 1.1, "hay"),
+    o(26, 81, 2, 2, 1.1, "hay"),
+    o(29.5, 85, 2, 2, 1.1, "hay"),
+    o(22, 87.5, 2, 2, 1.1, "hay"),
+    o(27, 90.5, 2, 2, 1.1, "hay"),
+    o(24, 94, 2, 2, 1.1, "hay"),
+    o(8, 94.7, 14, 0.3, 0.9, "fence"),
+  );
 
   // === ORCHARDS (NW + SW, mirrored) =========================================
   for (let i = 0; i < 4; i++) {
