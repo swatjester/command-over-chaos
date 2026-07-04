@@ -193,7 +193,7 @@ fireteam/
 | **M0 — Foundation** | 2–3 wks | Repo, CI, deterministic sim skeleton (tick, movement, LOS grid), Three.js iso camera + placeholder map, single soldier moving with prediction against local server |
 | **M1 — Combat vertical slice** | 4–6 wks | 4-soldier control, stances/movement modes, shot-% engine + UI, cover/suppression, one greybox map, 1v1 over the internet, replay capture. **Benchmark netcode + server density** |
 | **M2 — Squad play** | 4–6 wks | **Navmesh pathfinding** (soldiers route around obstacles; stance-aware clearance + vault links — replaces the M0/M1 interim of direct movement with wall-slide collision), grenades/smoke (LOS-blocking), buildings + cutaway, buddy actions, 3 archetypes (Infantry/Rangers/Recon), 2v2–4v4, basic lobby, bootcamp tutorial |
-| **M2.1 — Squad-play backlog** (deferred from M2) | 1–2 wks | Basic lobby, bootcamp tutorial, vault links + stance-aware nav clearance, multi-floor building cutaway |
+| **M2.1 — Squad-play backlog** (deferred from M2) | 1–2 wks | Basic lobby, **1v1 over the internet verified** (deferred from M1 — needs a deployed server, not localhost; validate latency feel/interp/reconnect on real WAN), bootcamp tutorial, vault links + stance-aware nav clearance, multi-floor building cutaway |
 | **M3 — The meta** | 6–8 wks | All 6 archetypes, Commander layer, PP rank system + hidden MMR, accounts, in-client social (friends/party/chat), stat pipeline (ClickHouse), profile pages, 3 polished maps, closed alpha with ex-CoC community (NA servers) |
 | **M4 — Regiments & esports** | 6–8 wks | Regiment system, regiment ladder + challenge flow, Discord integration/bot, spectator/caster client, tournament mode, replay viewer on web, public stats API, open beta (NA) |
 | **M5 — Polish & launch** | ongoing | Art pass to final quality, map editor, seasonal system, monetization (cosmetics-only), launch tournament |
@@ -205,7 +205,7 @@ fireteam/
 _As of 2026-07-02:_
 
 - **M0 — Foundation: ✓ complete**
-- **M1 — Combat vertical slice: ✓ complete** — shot-% engine with breakdown UI, LOS/cover/corner-peek/lean, suppression + pinning, settle mechanic, Farmstead map, squad controls, grenades, replay capture + verifier, 2-team netcode verified
+- **M1 — Combat vertical slice: ✓ complete*** — shot-% engine with breakdown UI, LOS/cover/corner-peek/lean, suppression + pinning, settle mechanic, Farmstead map, squad controls, grenades, replay capture + verifier. *2-team netcode verified on localhost only — "1v1 over the internet" moved to M2.1 (needs a deployed server)
 - **M2 — Squad play: core ✓ complete** — A* pathfinding (wall-slide fallback), hand vs GL grenade doctrine, buddy down/bleed-out/revive (once), session reclaim (I-001), 3 archetype kits, enlarged multi-room buildings with windows, over-the-top peeking
 - **M2.1 — Squad-play backlog: ⏳ pending** (see roadmap row)
 - **M3 — The meta: next up**
