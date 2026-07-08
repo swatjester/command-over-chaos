@@ -95,6 +95,9 @@ export const SoldierSnapshotSchema = z.object({
   aidProgress: z.number().int(),
   revived: z.boolean(),
   peekUp: z.boolean(),
+  vaultT: z.number().int(),
+  vaultX: z.number().int(),
+  vaultY: z.number().int(),
   queue: z.array(z.tuple([z.number().int(), z.number().int()])),
 });
 

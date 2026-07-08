@@ -1,13 +1,14 @@
 import { computeShotPct, effectiveSubject } from "./combat.js";
 import { DELIVERY, GL_FRAG, HAND_FRAG, SMOKE, type Boom } from "./grenades.js";
 import { losBetweenEx } from "./los.js";
-import { blocked } from "./map.js";
+import { blocked, blockedEx } from "./map.js";
 import { findPath } from "./path.js";
 import { clamp, dist, stepToward } from "./math.js";
 import type { Order } from "./orders.js";
 import { rngInt } from "./rng.js";
 import {
   AID_RANGE, AID_TICKS, BLEED_TICKS, MOVE_SPEED, PIN_THRESHOLD, REVIVE_HP,
+  VAULT_MAX, VAULT_TICKS,
   type SimState, type Soldier,
 } from "./state.js";
 import { WEAPONS } from "./weapons.js";
@@ -53,6 +54,39 @@ function dropSoldier(s: Soldier): void {
   s.aidId = null;
   s.aidProgress = 0;
   s.targetId = null;
+  s.vaultT = 0; // shot off the wall: stays on the takeoff side
+}
+
+/**
+ * VAULT: the direct step is blocked by thin low cover only — climb it.
+ * Scans along the line to the current waypoint for the first clear point
+ * past the cover (within VAULT_MAX). Prone or pinned soldiers can't climb.
+ * Returns true if the vault started (soldier freezes for VAULT_TICKS, fully
+ * exposed and unable to fire, then lands across the obstacle).
+ */
+function tryVault(state: SimState, s: Soldier, nx: number, ny: number): boolean {
+  if (s.stance === "prone" || s.suppression > PIN_THRESHOLD) return false;
+  if (s.tx === null || s.ty === null) return false;
+  if (blockedEx(state.obstacles, nx, ny) !== 2) return false;
+  const dx = s.tx - s.x, dy = s.ty - s.y;
+  const d = dist(s.x, s.y, s.tx, s.ty);
+  if (d === 0) return false;
+  let crossed = false;
+  for (let step = 200; step <= VAULT_MAX; step += 100) {
+    const px = s.x + Math.trunc((dx * step) / d);
+    const py = s.y + Math.trunc((dy * step) / d);
+    const b = blockedEx(state.obstacles, px, py);
+    if (b === 1) return false; // hard cover behind the low wall — no landing
+    if (b === 2) { crossed = true; continue; }
+    if (crossed) {
+      s.vaultT = VAULT_TICKS;
+      s.vaultX = clamp(px, 0, state.mapW);
+      s.vaultY = clamp(py, 0, state.mapH);
+      s.settle = 0;
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -164,7 +198,27 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   // 2. movement with AABB collision + wall slide over pathfound waypoints
   const prevPos = state.soldiers.map((s) => s.x * 0x40000000 + s.y); // cheap pos key
   for (const s of state.soldiers) {
-    if (!s.alive || s.down || s.tx === null || s.ty === null) continue;
+    if (!s.alive || s.down) continue;
+    // mid-vault: frozen on the takeoff side, then land across the cover
+    if (s.vaultT > 0) {
+      s.vaultT -= 1;
+      if (s.vaultT === 0) {
+        s.x = s.vaultX;
+        s.y = s.vaultY;
+        // consume waypoint(s) the vault crossed or landed on (their cell
+        // centers sit inside the cover — unreachable by walking)
+        while (
+          s.tx !== null && s.ty !== null &&
+          (dist(s.x, s.y, s.tx, s.ty) <= 400 ||
+            (blocked(state.obstacles, s.tx, s.ty) && dist(s.x, s.y, s.tx, s.ty) <= 1600))
+        ) {
+          const next = s.queue.shift();
+          if (next) { s.tx = next[0]; s.ty = next[1]; } else { s.tx = null; s.ty = null; }
+        }
+      }
+      continue;
+    }
+    if (s.tx === null || s.ty === null) continue;
     // pinned soldiers can only crawl
     const speed = s.suppression > PIN_THRESHOLD ? MOVE_SPEED.crawl : MOVE_SPEED[s.moveMode];
     const [nx, ny, arrived] = stepToward(s.x, s.y, s.tx, s.ty, speed);
@@ -181,6 +235,8 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
           s.ty = null;
         }
       }
+    } else if (tryVault(state, s, nx, ny)) {
+      // climbing — handled above next tick
     } else if (nx !== s.x && !blocked(state.obstacles, nx, s.y)) {
       s.x = nx; // slide along y-facing wall
     } else if (ny !== s.y && !blocked(state.obstacles, s.x, ny)) {
@@ -197,6 +253,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   for (let i = 0; i < state.soldiers.length; i++) {
     const s = state.soldiers[i]!;
     if (!s.alive || s.down) continue;
+    if (s.vaultT > 0) { s.settle = 0; continue; } // hands on the wall
     s.settle = s.x * 0x40000000 + s.y === prevPos[i] ? Math.min(s.settle + 1, 240) : 0;
   }
 
@@ -317,6 +374,15 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       s.leanX = 0;
       s.leanY = 0;
       s.peekUp = false;
+      continue;
+    }
+    if (s.vaultT > 0) {
+      // climbing: weapon slung — no aim, no fire, but cooldown still runs
+      s.aimId = null;
+      s.leanX = 0;
+      s.leanY = 0;
+      s.peekUp = false;
+      if (s.cooldown > 0) s.cooldown -= 1;
       continue;
     }
     const acq = acquireTarget(state, s);

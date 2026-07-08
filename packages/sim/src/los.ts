@@ -60,11 +60,32 @@ export function smokeBlocks(
 }
 
 export interface LosSubject { x: number; y: number; stance: Stance; }
-export interface LosResult { visible: boolean; targetInCover: boolean; }
+export interface LosResult {
+  visible: boolean;
+  targetInCover: boolean;
+  /** cover-quality multiplier applied to shot % (100 = no cover).
+   *  Strongest (lowest) intervening cover near the target wins. */
+  coverMult: number;
+}
 /** internal: segment result also notes low cover crossed near the SHOOTER */
 
 interface SegResult extends LosResult { overTop: boolean; }
-const BLOCKED: SegResult = { visible: false, targetInCover: false, overTop: false };
+const BLOCKED: SegResult = { visible: false, targetInCover: false, coverMult: 100, overTop: false };
+
+/** Cover quality by obstacle kind (I-004): a window/wall firing position is
+ *  meaningfully harder to hit into than a knee-high fence. Lower = stronger. */
+export function coverQuality(kind: Obstacle["kind"]): number {
+  switch (kind) {
+    case "window": return 40;   // hard frame: only head+shoulders exposed
+    case "wall": case "stone": case "shed": return 50;  // solid masonry/timber
+    case "hay": case "tree": return 55; // soft/organic bulk
+    case "fence": return 65;    // slat fence: concealment more than cover
+    default: return 55;
+  }
+}
+
+/** Corner-hugging exposure at a wall frame reads as solid cover. */
+const CORNER_COVER = 50;
 
 function pointInBox(x: number, y: number, o: Obstacle): boolean {
   return x > o.x && x < o.x + o.w && y > o.y && y < o.y + o.h;
@@ -83,7 +104,7 @@ function segmentLos(
   for (const c of smokes) {
     if (smokeBlocks(x1, y1, x2, y2, c)) return BLOCKED;
   }
-  let targetInCover = false;
+  let coverMult = 100;
   let overTop = false;
   for (const o of obstacles) {
     if (!segmentIntersectsBox(x1, y1, x2, y2, o)) continue;
@@ -93,7 +114,8 @@ function segmentLos(
       target.y > o.y - COVER_NEAR && target.y < o.y + o.h + COVER_NEAR;
     if (near) {
       if (target.stance === "prone") return BLOCKED;
-      targetInCover = true;
+      const q = coverQuality(o.kind);
+      if (q < coverMult) coverMult = q;
     }
     // low cover / window near the shooter: they're firing OVER/THROUGH it
     const nearShooter =
@@ -101,7 +123,7 @@ function segmentLos(
       y1 > o.y - COVER_NEAR && y1 < o.y + o.h + COVER_NEAR;
     if (nearShooter) overTop = true;
   }
-  return { visible: true, targetInCover, overTop };
+  return { visible: true, targetInCover: coverMult < 100, coverMult, overTop };
 }
 
 function peekPoints(s: LosSubject, obstacles: readonly Obstacle[]): Array<[number, number]> {
@@ -120,7 +142,7 @@ export interface LosResultEx extends LosResult {
   overTop: boolean;
 }
 
-const BLOCKED_EX: LosResultEx = { visible: false, targetInCover: false, leanX: 0, leanY: 0, overTop: false };
+const BLOCKED_EX: LosResultEx = { visible: false, targetInCover: false, coverMult: 100, leanX: 0, leanY: 0, overTop: false };
 
 /**
  * LOS with CORNER PEEK (the CoC doorway rule): if the direct line is blocked,
@@ -141,7 +163,7 @@ export function losBetweenEx(
   // target exposed at their frame — no lean needed
   for (const [px, py] of tPeeks) {
     const r = segmentLos(obstacles, smokes, shooter.x, shooter.y, px, py, target);
-    if (r.visible) return { visible: true, targetInCover: true, leanX: 0, leanY: 0, overTop: r.overTop };
+    if (r.visible) return { visible: true, targetInCover: true, coverMult: Math.min(CORNER_COVER, r.coverMult), leanX: 0, leanY: 0, overTop: r.overTop };
   }
   // shooter leans
   for (const [px, py] of peekPoints(shooter, obstacles)) {
@@ -150,7 +172,7 @@ export function losBetweenEx(
     // mutual lean (same-side facing doorways)
     for (const [qx, qy] of tPeeks) {
       const d = segmentLos(obstacles, smokes, px, py, qx, qy, target);
-      if (d.visible) return { visible: true, targetInCover: true, leanX: px - shooter.x, leanY: py - shooter.y, overTop: d.overTop };
+      if (d.visible) return { visible: true, targetInCover: true, coverMult: Math.min(CORNER_COVER, d.coverMult), leanX: px - shooter.x, leanY: py - shooter.y, overTop: d.overTop };
     }
   }
   return BLOCKED_EX;
@@ -161,5 +183,5 @@ export function losBetween(
   smokes: readonly SmokeCloud[] = [],
 ): LosResult {
   const r = losBetweenEx(obstacles, shooter, target, smokes);
-  return { visible: r.visible, targetInCover: r.targetInCover };
+  return { visible: r.visible, targetInCover: r.targetInCover, coverMult: r.coverMult };
 }

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   blocked, computeShotPct, createState, dist, FARMSTEAD_MAP, GREYBOX_MAP,
-  hashState, losBetween, losBetweenEx, MM, rngInt, spawnSoldier, tick, WEAPONS,
-  type Order, type OrderLog,
+  hashState, losBetween, losBetweenEx, MM, rngInt, spawnSoldier, tick,
+  VAULT_TICKS, WEAPONS,
+  type MapDef, type Order, type OrderLog,
 } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
@@ -637,5 +638,129 @@ describe("windows + peek-over", () => {
     const shot = computeShotPct(s.obstacles, attacker, { ...defender, tx: null });
     expect(shot.visible).toBe(true);
     expect(shot.factors.some((f) => f.label === "target in cover")).toBe(true);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// M2.1: vault links + cover-quality tiers
+// ---------------------------------------------------------------------------
+
+/** empty 100x100 field with a single east-west low obstacle at y=50m */
+function fenceMap(kind: "fence" | "stone" | "hay", ht = 900): MapDef {
+  return {
+    w: 100 * MM,
+    h: 100 * MM,
+    obstacles: [{ x: 0, y: 50 * MM, w: 100 * MM, h: kind === "hay" ? 2 * MM : 400, ht, kind }],
+    spawns: [[[50 * MM, 10 * MM]], [[50 * MM, 90 * MM]]],
+  };
+}
+
+describe("vault links", () => {
+  it("standing soldier climbs a thin fence line to reach the far side", () => {
+    const state = createState(1, fenceMap("fence"));
+    const s = spawnSoldier(state, 0, 50 * MM, 45 * MM);
+    tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 55 * MM }]);
+    for (let t = 0; t < 400; t++) tick(state, []);
+    expect(s.y).toBeGreaterThan(50 * MM + 400);
+    expect(dist(s.x, s.y, 50 * MM, 55 * MM)).toBeLessThan(600);
+  });
+
+  it("vaulting takes VAULT_TICKS frozen on the takeoff side, then lands", () => {
+    const state = createState(1, fenceMap("stone", 1100));
+    const s = spawnSoldier(state, 0, 50 * MM, 48 * MM);
+    tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 52 * MM }]);
+    // walk to the wall until the vault starts
+    let started = -1;
+    for (let t = 0; t < 200 && started < 0; t++) {
+      tick(state, []);
+      if (s.vaultT > 0) started = t;
+    }
+    expect(started).toBeGreaterThanOrEqual(0);
+    const yAtStart = s.y;
+    expect(s.vaultT).toBe(VAULT_TICKS);
+    for (let t = 0; t < VAULT_TICKS - 1; t++) tick(state, []);
+    expect(s.y).toBe(yAtStart); // frozen mid-climb
+    tick(state, []);
+    expect(s.y).toBeGreaterThan(50 * MM); // landed across
+  });
+
+  it("prone soldiers cannot vault (stance-aware clearance)", () => {
+    const state = createState(1, fenceMap("fence"));
+    const s = spawnSoldier(state, 0, 50 * MM, 45 * MM);
+    tick(state, [
+      { type: "stance", soldierId: 0, stance: "prone" },
+      { type: "move", soldierId: 0, x: 50 * MM, y: 55 * MM },
+    ]);
+    for (let t = 0; t < 400; t++) tick(state, []);
+    expect(s.y).toBeLessThan(50 * MM); // stuck on the near side
+    expect(s.vaultT).toBe(0);
+  });
+
+  it("bulky low cover (hay) cannot be vaulted", () => {
+    const state = createState(1, fenceMap("hay"));
+    const s = spawnSoldier(state, 0, 50 * MM, 45 * MM);
+    tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 56 * MM }]);
+    for (let t = 0; t < 400; t++) tick(state, []);
+    expect(s.y).toBeLessThan(50 * MM);
+  });
+
+  it("a vaulting soldier cannot fire and presents a standing profile", () => {
+    const state = createState(1, fenceMap("fence"));
+    const a = spawnSoldier(state, 0, 50 * MM, 45 * MM);
+    spawnSoldier(state, 1, 50 * MM, 70 * MM);
+    tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 55 * MM }]);
+    while (a.vaultT === 0) tick(state, []);
+    const shot = computeShotPct(state.obstacles, a, state.soldiers[1]!, []);
+    expect(shot.vaulting).toBe(true);
+    expect(shot.pct).toBe(0);
+    expect(a.aimId).toBeNull();
+    // and the enemy sees a standing silhouette even if the vaulter was crouched
+    const back = computeShotPct(state.obstacles, state.soldiers[1]!, a, []);
+    expect(back.factors.find((f) => f.label === "target profile")).toBeUndefined();
+  });
+
+  it("vault determinism: same orders => same hash", () => {
+    const run = (): number => {
+      const state = createState(9, fenceMap("fence"));
+      spawnSoldier(state, 0, 50 * MM, 45 * MM);
+      spawnSoldier(state, 1, 50 * MM, 90 * MM);
+      tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 80 * MM }]);
+      for (let t = 0; t < 600; t++) tick(state, []);
+      return hashState(state);
+    };
+    expect(run()).toBe(run());
+  });
+});
+
+describe("cover-quality tiers (I-004)", () => {
+  const shooterAt = (x: number, y: number) => ({
+    x, y, stance: "stand" as const, moveMode: "move" as const, tx: null,
+    suppression: 0, weapon: "carbine" as const, settle: 240, peekUp: false,
+  });
+
+  function pctBehind(kind: "window" | "stone" | "fence"): number {
+    const obstacles = [{ x: 45 * MM, y: 50 * MM, w: 10 * MM, h: 400, ht: 1100, kind }];
+    const shooter = shooterAt(50 * MM, 40 * MM);
+    const target = { ...shooterAt(50 * MM, 51 * MM), stance: "stand" as const };
+    return computeShotPct(obstacles, shooter, target, []).pct;
+  }
+
+  it("window is stronger cover than stone; stone stronger than fence", () => {
+    const win = pctBehind("window");
+    const stone = pctBehind("stone");
+    const fence = pctBehind("fence");
+    expect(win).toBeLessThan(stone);
+    expect(stone).toBeLessThan(fence);
+  });
+
+  it("strongest intervening cover wins and shows in the factor breakdown", () => {
+    const obstacles = [
+      { x: 45 * MM, y: 50 * MM, w: 10 * MM, h: 400, ht: 1100, kind: "fence" as const },
+      { x: 45 * MM, y: 50.8 * MM, w: 10 * MM, h: 400, ht: 1100, kind: "window" as const },
+    ];
+    const shot = computeShotPct(obstacles, shooterAt(50 * MM, 40 * MM), shooterAt(50 * MM, 52 * MM), []);
+    const f = shot.factors.find((x) => x.label === "target in cover");
+    expect(f?.mult).toBe(40);
   });
 });

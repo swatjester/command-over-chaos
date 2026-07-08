@@ -1,13 +1,16 @@
 /**
  * Deterministic grid pathfinding (the M2 "navmesh"): 1m cells, obstacles
  * inflated by soldier radius, 8-directional A* without corner cutting.
- * Stance-aware clearance and vault links come later; this replaces
- * wall-slide-only movement so soldiers route around buildings.
+ * VAULT LINKS (M2.1): cells covered only by thin low cover (walls/fences/
+ * window sills) are traversable at a penalty — routes prefer gaps and doors
+ * but climb over when it's much shorter. tick.ts performs the actual vault.
  */
-import { blocked, type Obstacle } from "./map.js";
+import { blocked, blockedEx, type Obstacle } from "./map.js";
 
 const CELL = 1000; // mm
 const MAX_EXPANSIONS = 30000;
+/** extra A* cost for crossing a vaultable cell (vs 100/cell walking) */
+const VAULT_COST = 350;
 
 interface NavGrid { w: number; h: number; cells: Uint8Array; }
 
@@ -21,7 +24,7 @@ export function getNavGrid(obstacles: readonly Obstacle[], mapW: number, mapH: n
     const cells = new Uint8Array(w * h);
     for (let cy = 0; cy < h; cy++) {
       for (let cx = 0; cx < w; cx++) {
-        if (blocked(obstacles, cx * CELL + CELL / 2, cy * CELL + CELL / 2)) cells[cy * w + cx] = 1;
+        cells[cy * w + cx] = blockedEx(obstacles, cx * CELL + CELL / 2, cy * CELL + CELL / 2);
       }
     }
     g = { w, h, cells };
@@ -110,7 +113,7 @@ export function findPath(
   const start = scy * g.w + scx;
   let goal = tcy * g.w + tcx;
   let exactGoal = true;
-  if (g.cells[goal] === 1) {
+  if (g.cells[goal] !== 0) {
     const nf = nearestFree(g, tcx, tcy);
     if (nf === null) return null;
     goal = nf;
@@ -141,9 +144,9 @@ export function findPath(
         if (nx < 0 || ny < 0 || nx >= g.w || ny >= g.h) continue;
         const ni = ny * g.w + nx;
         if (g.cells[ni] === 1 || closed[ni]) continue;
-        // no diagonal corner cutting
-        if (dx !== 0 && dy !== 0 && (g.cells[cy * g.w + nx] === 1 || g.cells[ny * g.w + cx] === 1)) continue;
-        const nd = dist[cur]! + (dx !== 0 && dy !== 0 ? 141 : 100);
+        // no diagonal corner cutting (through or past any cover)
+        if (dx !== 0 && dy !== 0 && (g.cells[cy * g.w + nx] !== 0 || g.cells[ny * g.w + cx] !== 0)) continue;
+        const nd = dist[cur]! + (dx !== 0 && dy !== 0 ? 141 : 100) + (g.cells[ni] === 2 ? VAULT_COST : 0);
         if (nd < dist[ni]!) {
           dist[ni] = nd;
           came[ni] = cur;

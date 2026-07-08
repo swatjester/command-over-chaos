@@ -18,15 +18,43 @@ export interface Obstacle {
   kind: ObstacleKind;
 }
 
+/** Named enterable-structure footprint (mm AABB) — rendering hint only
+ *  (roof + cutaway); carries no sim meaning. */
+export interface BuildingDef { name: string; x: number; y: number; w: number; h: number; }
+
 export interface MapDef {
   w: number;
   h: number;
   obstacles: Obstacle[];
   /** fireteam anchor points per team, mm — used by server/offline spawning */
   spawns: [Array<[number, number]>, Array<[number, number]>];
+  /** enterable structures, for client roof/cutaway rendering */
+  buildings?: BuildingDef[];
 }
 
 export const SOLDIER_RADIUS = 350; // mm
+
+/** Thin, low cover a standing/crouching soldier can climb over: low walls,
+ *  fences, window sills. Bulky low cover (hay bales, tree trunks) cannot be
+ *  vaulted. 1200 = WALL_HEIGHT (kept literal: los.ts imports this module). */
+export function vaultable(o: Obstacle): boolean {
+  return o.ht <= 1200 && o.kind !== "tree" && o.kind !== "hay" && Math.min(o.w, o.h) <= 700;
+}
+
+/** Collision class at (x,y): 0 = free, 1 = hard block, 2 = vaultable cover only. */
+export function blockedEx(obstacles: readonly Obstacle[], x: number, y: number): 0 | 1 | 2 {
+  let v: 0 | 1 | 2 = 0;
+  for (const o of obstacles) {
+    if (
+      x > o.x - SOLDIER_RADIUS && x < o.x + o.w + SOLDIER_RADIUS &&
+      y > o.y - SOLDIER_RADIUS && y < o.y + o.h + SOLDIER_RADIUS
+    ) {
+      if (!vaultable(o)) return 1;
+      v = 2;
+    }
+  }
+  return v;
+}
 
 /** True if a soldier center at (x,y) would intersect any obstacle. */
 export function blocked(obstacles: readonly Obstacle[], x: number, y: number): boolean {
@@ -213,6 +241,12 @@ function farmstead(): MapDef {
     w: 150000,
     h: 150000,
     obstacles: obs,
+    buildings: [
+      { name: "maison", x: 54800, y: 13800, w: 40400, h: 22400 },
+      { name: "church-nave", x: 66800, y: 103800, w: 16400, h: 36400 },
+      { name: "church-transept", x: 54800, y: 115800, w: 40400, h: 12400 },
+      { name: "barn", x: 18750, y: 49750, w: 14500, h: 24500 },
+    ],
     // out of weapon range (max 90m) and behind own building
     spawns: [
       [[40000, 8000], [75000, 8000], [110000, 8000]],

@@ -16,6 +16,10 @@ export const AID_TICKS = 150; // 5s
 export const AID_RANGE = 1600;
 /** HP restored by a field revive. */
 export const REVIVE_HP = 25;
+/** Climbing thin low cover takes 1s: stationary, exposed, can't fire. */
+export const VAULT_TICKS = 30;
+/** How far past cover a vault can land (mm). */
+export const VAULT_MAX = 2500;
 
 export type Stance = "stand" | "crouch" | "prone";
 export type MoveMode = "sprint" | "move" | "sneak" | "crawl";
@@ -64,6 +68,11 @@ export interface Soldier {
   revived: boolean;
   /** currently peeking over adjacent low cover / through a window to aim */
   peekUp: boolean;
+  /** ticks remaining in a vault over low cover (0 = not vaulting) */
+  vaultT: number;
+  /** vault landing point (valid while vaultT > 0) */
+  vaultX: number;
+  vaultY: number;
 }
 
 export interface SimState {
@@ -114,6 +123,7 @@ export function spawnSoldier(
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
     queue: [], frags, smokes, holdFire: false, leanX: 0, leanY: 0,
     down: false, bleed: 0, aidId: null, aidProgress: 0, revived: false, peekUp: false,
+    vaultT: 0, vaultX: 0, vaultY: 0,
   };
   s.soldiers.push(soldier);
   return soldier;

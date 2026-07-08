@@ -8,7 +8,7 @@
 import { createState, FARMSTEAD_MAP, spawnSoldier, tick, MM } from "../../packages/sim/dist/index.js";
 
 const W = ["carbine", "lmg", "dmr", "smg"];
-const SEEDS = 100;
+const SEEDS = Number(process.env.SEEDS ?? 100);
 
 function run(seed, flip) {
   const s = createState(seed, FARMSTEAD_MAP);

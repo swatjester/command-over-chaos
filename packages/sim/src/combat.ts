@@ -24,10 +24,13 @@ export interface Combatant {
   settle: number;
   /** aiming over adjacent low cover / through a window (prone counts as crouch) */
   peekUp: boolean;
+  /** mid-vault over low cover: can't fire, fully exposed (optional: old snapshots) */
+  vaultT?: number;
 }
 
 /** A peeking-over prone soldier presents a crouch-sized profile and is not hidden. */
 export function effectiveSubject(c: Combatant): { x: number; y: number; stance: Combatant["stance"] } {
+  if ((c.vaultT ?? 0) > 0) return { x: c.x, y: c.y, stance: "stand" }; // silhouetted on the cover
   return { x: c.x, y: c.y, stance: c.peekUp && c.stance === "prone" ? "crouch" : c.stance };
 }
 
@@ -46,10 +49,12 @@ export interface ShotPct {
   inRange: boolean;
   /** true when the only blocker is the long-range settle requirement */
   settling: boolean;
+  /** true when the only blocker is the shooter being mid-vault */
+  vaulting: boolean;
   factors: ShotFactor[];
 }
 
-const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settling: false, factors: [] };
+const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settling: false, vaulting: false, factors: [] };
 
 export function computeShotPct(
   obstacles: readonly Obstacle[], shooter: Combatant, target: Combatant,
@@ -65,9 +70,14 @@ export function computeShotPct(
   const los = losBetween(obstacles, shooter, tEff, smokes);
   if (!los.visible) return { ...NO_SHOT, visible: false, inRange: true };
 
+  // hands on the wall, not the weapon
+  if ((shooter.vaultT ?? 0) > 0) {
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: false, vaulting: true, factors: [] };
+  }
+
   // long-range shots require a settled (stationary) shooter
   if (d > w.settleStart && shooter.settle < w.settleTicks) {
-    return { pct: 0, base: 0, visible: true, inRange: true, settling: true, factors: [] };
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: true, vaulting: false, factors: [] };
   }
 
   // base accuracy: flat to falloffStart, then linear to minAcc at maxRange
@@ -90,8 +100,8 @@ export function computeShotPct(
   if (shooter.suppression > 0) apply("suppressed", 100 - Math.floor(shooter.suppression / 2));
   apply("target profile", tEff.stance === "prone" ? 55 : tEff.stance === "crouch" ? 80 : 100);
   if (target.tx !== null) apply("target moving", target.moveMode === "sprint" ? 75 : 90);
-  if (los.targetInCover) apply("target in cover", 50);
+  if (los.coverMult < 100) apply("target in cover", los.coverMult);
 
   pct = pct < 1 ? 1 : pct > 99 ? 99 : pct;
-  return { pct, base, visible: true, inRange: true, settling: false, factors };
+  return { pct, base, visible: true, inRange: true, settling: false, vaulting: false, factors };
 }
