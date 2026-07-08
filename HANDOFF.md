@@ -1,6 +1,6 @@
 # HANDOFF — Command over Chaos (CoC)
 
-_Session handoff, written 2026-07-02. Read this + PLAN.md + ISSUES.md before doing anything._
+_Session handoff, written 2026-07-02, updated 2026-07-08. Read this + PLAN.md + ISSUES.md before doing anything._
 
 ## What this project is
 
@@ -15,7 +15,7 @@ A browser-based, modern-warfare multiplayer squad-tactics game — spiritual suc
 
 1. **The OneDrive mount (`/sessions/<name>/mnt/COC`) serves STALE/TRUNCATED reads of recently-edited files.** This corrupted a pushed commit once. NEVER `cp` from the mount into the git clone. Write files into the clone directly (heredoc/python), or `git checkout HEAD -- <file>` + re-apply patches. Only docs (PLAN.md, ISSUES.md, HANDOFF.md) are maintained in the mount, via the Write/Edit tools.
 2. **Git workflow:** clone lives in `/tmp/build` (scratch — may vanish; re-clone freely). `api.github.com` is proxy-blocked; `git` over HTTPS to `github.com` works. Dan supplies a **PAT** in chat when needed (needs `repo` + `workflow` scopes); set remote URL with token for push, scrub after. Never init git in the OneDrive folder (also blocked deletions need `allow_cowork_file_delete`).
-3. **Verify before every push:** `pnpm build`, `pnpm --filter @coc/sim test` (43 tests), `node tools/balance/mirror-battle.mjs` (fairness), live ws smoke when netcode changed.
+3. **Verify before every push:** `pnpm build`, `pnpm --filter @coc/sim test` (52 tests), `node tools/balance/mirror-battle.mjs` (fairness; SEEDS env scales the run), live ws smoke when netcode changed.
 4. Background processes die between bash calls — run server+client smokes in a single call.
 
 ## Architecture (monorepo, pnpm workspaces)
@@ -23,7 +23,7 @@ A browser-based, modern-warfare multiplayer squad-tactics game — spiritual suc
 - `packages/sim` — THE deterministic core. Fixed 30Hz tick, integer-mm coordinates, seeded mulberry32 RNG (`state.rng` stream), FNV-1a `hashState` for desync detection. **Never introduce floats/clocks/unordered iteration into sim state. `Math.trunc` not `floor` for direction-symmetric movement. No `Math.cos/sin` (not IEEE-deterministic).** Key modules: `map.ts` (obstacles as corner AABBs mm + `FARMSTEAD_MAP`/`ACTIVE_MAP` + spawns), `los.ts` (exact-int segment tests, corner-peek/lean ladder, over-top peek, smoke chord rule), `combat.ts` (`computeShotPct` — pure over snapshot-shaped objects so client renders exact server numbers, with factor breakdown), `path.ts` (grid A* + string-pulling), `tick.ts` (orders→movement→grenades→bleed/aid→two-phase simultaneous combat→suppression decay), `weapons.ts`, `grenades.ts`.
 - `packages/protocol` — zod schemas both directions. Snapshot soldiers carry ALL fields client UI needs (aim/lean/peekUp/down/bleed/revived/settle/inventory/queue).
 - `packages/shared` — `ARCHETYPE_KITS` (weapon+grenade loadouts), constants.
-- `apps/game-server` — one process = one match; ws (`ws` lib; uWS later); **fog-culled snapshots per team (never sends unseen enemies — anti-wallhack by construction)**; 10Hz snapshots (tick%3); session tokens → squad reclaim on refresh (I-001 fixed), 120s orphan reap; **records replays** (seed+spawns+orders+reaps per tick → `replays/*.json`).
+- `apps/game-server` — one process = one match; ws (`ws` lib; uWS later); **fog-culled snapshots per team (never sends unseen enemies — anti-wallhack by construction)**; 10Hz snapshots (tick%3); session tokens (client stores in sessionStorage — per-tab, so multiple windows = multiple players; I-003) → squad reclaim on refresh (I-001 fixed), 120s orphan reap; **records replays** (seed+spawns+orders+reaps per tick → `replays/*.json`).
 - `apps/client` — Vite+React+Three.js. Ortho iso camera (middle-drag yaw), map rendered FROM sim data (single source of truth), archetype picker, marquee/multi-select, hover shot-% with factor breakdown, soldier cards (HP/SUP/bleed bars, aim %, stance icons, HOLD/DOWN/KIA/✚ revived), tracers (misses visibly offset), grenade arcs, smoke clouds, explosion rings, last-known-position red-diamond ghosts, lean/peek-up visual poses.
 - `tools/balance/mirror-battle.mjs` — dual-orientation fairness harness. `tools/replay/verify.mjs` — replay determinism prover.
 
@@ -37,11 +37,17 @@ A browser-based, modern-warfare multiplayer squad-tactics game — spiritual suc
 - **Grenades (doctrine locked)**: hand = 15m, 10% deviation, lethal ≤2m (direct overkill), light dmg to 6m, stun (sup=100) ≤4.5m, shaken to 9m, 1.5s fuse after landing. GL (grenadier only) = 45m, 3% deviation, impact-fuzed, direct ≤1.5m → DOWN (never kill), stun ≤3.5m, shaken to 6m. Q=frag/E=smoke arm-then-click; thrower = first selected with inventory (**M2.1: multi-select throw UX undecided**).
 - **Down/revive**: lethal small-arms/GL/outer-frag → DOWN (60s bleed); hand-frag-adjacent → dead; frag hits on downed → dead; aid order (right-click downed ally) walks medic in, 5s adjacent stationary channel → 25hp, woozy; **one revive per soldier — second downing fatal** (✚ mark).
 - **Suppression**: pins >70 (crawl only); decays 1/tick. **Combat is two-phase simultaneous** (no id-order advantage; mutual kills possible).
+- **Cover tiers** (I-004b): target-in-cover multiplier by kind — window ×0.40, wall/stone/shed ×0.50, hay/tree ×0.55, fence ×0.65; strongest intervening cover near the target wins; corner-hug exposure stays ×0.50.
+- **Vault** (M2.1): thin low cover (≤1200mm high, ≤700mm thick, not hay/tree) is climbable — soldier freezes VAULT_TICKS (1s), weapon slung, standing profile, then lands ≤2.5m across; prone/pinned can't; A* crosses vault cells at +350 cost so routes prefer gaps/doors. Fields vaultT/vaultX/vaultY on Soldier.
+- **Veterancy pips** (M3 slice): a kill grants a pip (max 3), +4% accuracy each — visible "veteran" factor in the % breakdown; in-match only.
+- **Lobby** (M2.1): server starts in lobby phase — name/team/archetype/ready; auto-start (3s countdown) when both sides manned + everyone ready; explicit START force-starts any layout (solo testing); late join while live spawns immediately; sim only ticks once live.
+- **Bootcamp**: offline 7-step tutorial (client menu when no server found); dummies hold fire; steps gate on snapshot predicates.
+- **Grenade UX (locked)**: multi-select throw = closest-to-target with inventory; a selected grenadier whose GL reaches the click takes priority.
 - **Controls**: left-click select, drag box-select, ` squad, 1–4 singles, right-click move/fire/revive, shift+right queue (pathfound), F sprint toggle, T hold-fire toggle (hold clears fire orders — "hold means STOP"; explicit target overrides posture), Z/X/C stance, H halt, Q/E grenades, Esc cancel, WASD/wheel/middle-drag camera.
 
 ## Status (mirrors PLAN "Milestone status")
 
-M0 ✓, M1 ✓ (except internet-verified netcode → M2.1), M2 core ✓. **M2.1 pending:** lobby, 1v1-over-internet verification (needs deployed server — Fly.io per plan), bootcamp tutorial, vault links/stance-aware clearance, multi-floor cutaway, multi-select grenade UX. **M3 next:** archetype abilities/stats, PP rank system (enlisted upward-only, officers losable; hidden MMR), accounts, stats pipeline (ClickHouse), profile pages, 3 polished maps, closed alpha with ex-CoC community (NA-first).
+M0 ✓, M1 ✓, M2 core ✓, **M2.1 ✓ except 1v1-over-internet verification** (needs a deployed server — Fly.io per plan): lobby ✓, bootcamp ✓, vault links ✓, roofs+cutaway ✓, grenade UX locked ✓. I-004 readability fixed (muzzle flash/fat tracers/damage flash/UNDER FIRE chips + cover tiers). **M3 started:** veterancy pips done; next: archetype abilities/stat blocks, PP rank system (enlisted upward-only, officers losable; hidden MMR), accounts, stats pipeline (ClickHouse), profile pages, 3 polished maps, closed alpha with ex-CoC community (NA-first).
 
 ## Open issues / known quirks
 
