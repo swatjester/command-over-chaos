@@ -1,6 +1,9 @@
 /**
- * CoC authoritative match server — M2.
+ * CoC authoritative match server — M2.1.
  * One process = one match. 30Hz fixed tick; all rules in @coc/sim.
+ * LOBBY: players join, pick team/archetype, ready up; match spawns squads
+ * when everyone is ready (auto when both teams are manned, or on an
+ * explicit start request — solo testing stays one click away).
  * Fog-culled snapshots per team; session tokens reclaim squads across
  * reconnects (I-001); every match records a verifiable replay.
  */
@@ -15,6 +18,7 @@ import { ARCHETYPE_KITS, DEFAULT_SERVER_PORT, type PlayableArchetype } from "@co
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const RECONNECT_GRACE_MS = 120_000;
+const COUNTDOWN_S = 3;
 
 const seed = Date.now() >>> 0;
 const state = createState(seed, ACTIVE_MAP);
@@ -43,11 +47,19 @@ function saveReplay(): void {
 }
 setInterval(saveReplay, 30_000);
 
-// ---- players / sessions -----------------------------------------------------
+// ---- players / sessions / lobby ---------------------------------------------
+type Phase = "lobby" | "starting" | "live";
+let phase: Phase = "lobby";
+let countdown = 0;
+let countdownTimer: NodeJS.Timeout | null = null;
+
 interface Player {
   id: string;
   token: string;
+  name: string;
   team: 0 | 1;
+  archetype: PlayableArchetype;
+  ready: boolean;
   soldierIds: number[];
   ws: WebSocket | null;
   reapTimer: NodeJS.Timeout | null;
@@ -55,24 +67,35 @@ interface Player {
 const players = new Map<string, Player>(); // by token
 const byWs = new Map<WebSocket, Player>();
 let nextPlayerNum = 0;
+const nextAnchor: [number, number] = [0, 0]; // per-team spawn anchor cursor
 
 const wss = new WebSocketServer({ port: PORT });
-console.log(`[coc] match server on :${PORT}, tick ${TICK_RATE}Hz, replay -> ${replayFile}`);
+console.log(`[coc] match server on :${PORT}, tick ${TICK_RATE}Hz, lobby open, replay -> ${replayFile}`);
 
 wss.on("connection", (ws) => {
   ws.on("message", (data) => {
     const parsed = ClientMsgSchema.safeParse(JSON.parse(String(data)));
     if (!parsed.success) return; // invalid input: drop silently (server-authoritative)
     const msg = parsed.data;
+    const player = byWs.get(ws);
     if (msg.t === "join") {
-      handleJoin(ws, msg.token ?? `anon-${nextPlayerNum}`, msg.archetype ?? "infantry");
+      handleJoin(ws, msg.token ?? `anon-${nextPlayerNum}`, msg.name, msg.archetype ?? "infantry");
     } else if (msg.t === "orders") {
-      const player = byWs.get(ws);
       if (!player) return;
       for (const o of msg.orders) {
         // authorization: you may only command your own soldiers
         if (player.soldierIds.includes(o.soldierId)) pendingOrders.push(o);
       }
+    } else if (msg.t === "lobby") {
+      if (!player || phase === "live") return;
+      if (msg.team !== undefined) { player.team = msg.team; player.ready = false; }
+      if (msg.archetype !== undefined) player.archetype = msg.archetype;
+      if (msg.name !== undefined) player.name = msg.name;
+      if (msg.ready !== undefined) player.ready = msg.ready;
+      if (phase === "starting" && !everyoneReady()) cancelCountdown();
+      if (msg.start && everyoneReady()) beginCountdown(); // explicit start: any team layout (solo testing)
+      else if (everyoneReady() && bothTeamsManned() && players.size >= 2) beginCountdown();
+      lobbyBroadcast();
     } else if (msg.t === "ping") {
       send(ws, { t: "pong", n: msg.n });
     }
@@ -83,38 +106,53 @@ wss.on("connection", (ws) => {
     if (!player) return;
     byWs.delete(ws);
     player.ws = null;
+    if (phase !== "live" && player.soldierIds.length === 0) {
+      // lobby-phase leave: drop the slot (a refresh rejoins in a second)
+      players.delete(player.token);
+      if (phase === "starting" && !everyoneReady()) cancelCountdown();
+      lobbyBroadcast();
+      console.log(`[coc] ${player.id} left the lobby`);
+      return;
+    }
     console.log(`[coc] ${player.id} disconnected — ${RECONNECT_GRACE_MS / 1000}s to reclaim`);
     player.reapTimer = setTimeout(() => reap(player), RECONNECT_GRACE_MS);
   });
 });
 
-function handleJoin(ws: WebSocket, token: string, archetype: PlayableArchetype): void {
+function everyoneReady(): boolean {
+  if (players.size === 0) return false;
+  for (const p of players.values()) if (!p.ready || !p.ws) return false;
+  return true;
+}
+function bothTeamsManned(): boolean {
+  let t0 = 0, t1 = 0;
+  for (const p of players.values()) p.team === 0 ? t0++ : t1++;
+  return t0 > 0 && t1 > 0;
+}
+
+function handleJoin(ws: WebSocket, token: string, name: string, archetype: PlayableArchetype): void {
   let player = players.get(token);
   if (player) {
-    // session reclaim (I-001): same squad, fresh socket
+    // session reclaim (I-001): same slot/squad, fresh socket
     if (player.reapTimer) { clearTimeout(player.reapTimer); player.reapTimer = null; }
     if (player.ws && player.ws !== ws && player.ws.readyState === WebSocket.OPEN) player.ws.close();
     if (player.ws) byWs.delete(player.ws);
     player.ws = ws;
     byWs.set(ws, player);
-    console.log(`[coc] ${player.id} reclaimed squad ${player.soldierIds.join(",")}`);
+    console.log(`[coc] ${player.id} reclaimed ${player.soldierIds.length > 0 ? `squad ${player.soldierIds.join(",")}` : "lobby slot"}`);
   } else {
-    const team = (nextPlayerNum % 2) as 0 | 1;
-    const anchors = ACTIVE_MAP.spawns[team];
-    const [ax, ay] = anchors[Math.floor(nextPlayerNum / 2) % anchors.length]!;
-    const kit = ARCHETYPE_KITS[archetype];
-    const spawns: NonNullable<ReplayEvent["spawns"]> = [];
-    const soldierIds = kit.map((k, i) => {
-      const x = ax + Math.round((i - 1.5) * 3 * MM);
-      const weapon = k.weapon as WeaponId;
-      spawns.push({ team, x, y: ay, weapon, frags: k.frags, smokes: k.smokes });
-      return spawnSoldier(state, team, x, ay, weapon, k.frags, k.smokes).id;
-    });
-    replay.events.push({ t: state.tick, spawns });
-    player = { id: `p${nextPlayerNum++}`, token, team, soldierIds, ws, reapTimer: null };
+    // default team assignment balances headcount; player can switch in lobby
+    let t0 = 0, t1 = 0;
+    for (const p of players.values()) p.team === 0 ? t0++ : t1++;
+    const team = (t0 <= t1 ? 0 : 1) as 0 | 1;
+    player = {
+      id: `p${nextPlayerNum++}`, token, name, team, archetype,
+      ready: false, soldierIds: [], ws, reapTimer: null,
+    };
     players.set(token, player);
     byWs.set(ws, player);
-    console.log(`[coc] ${player.id} joined team ${team} as ${archetype}, soldiers ${soldierIds.join(",")}`);
+    console.log(`[coc] ${player.id} (${name}) joined the ${phase}`);
+    if (phase === "live") spawnSquad(player); // late join: straight into the match
   }
   send(ws, {
     t: "welcome",
@@ -125,6 +163,57 @@ function handleJoin(ws: WebSocket, token: string, archetype: PlayableArchetype):
     mapH: state.mapH,
     tickRate: TICK_RATE,
   });
+  lobbyBroadcast();
+}
+
+function spawnSquad(player: Player): void {
+  const anchors = ACTIVE_MAP.spawns[player.team];
+  const [ax, ay] = anchors[nextAnchor[player.team] % anchors.length]!;
+  nextAnchor[player.team] += 1;
+  const kit = ARCHETYPE_KITS[player.archetype];
+  const spawns: NonNullable<ReplayEvent["spawns"]> = [];
+  player.soldierIds = kit.map((k, i) => {
+    const x = ax + Math.round((i - 1.5) * 3 * MM);
+    const weapon = k.weapon as WeaponId;
+    spawns.push({ team: player.team, x, y: ay, weapon, frags: k.frags, smokes: k.smokes });
+    return spawnSoldier(state, player.team, x, ay, weapon, k.frags, k.smokes).id;
+  });
+  replay.events.push({ t: state.tick, spawns });
+  console.log(`[coc] ${player.id} fields team ${player.team} ${player.archetype}: soldiers ${player.soldierIds.join(",")}`);
+}
+
+function beginCountdown(): void {
+  if (phase !== "lobby") return;
+  phase = "starting";
+  countdown = COUNTDOWN_S;
+  countdownTimer = setInterval(() => {
+    countdown -= 1;
+    if (countdown <= 0) {
+      clearInterval(countdownTimer!);
+      countdownTimer = null;
+      startMatch();
+    } else {
+      lobbyBroadcast();
+    }
+  }, 1000);
+  console.log(`[coc] all ready — starting in ${COUNTDOWN_S}s`);
+}
+
+function cancelCountdown(): void {
+  if (phase !== "starting") return;
+  phase = "lobby";
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  console.log("[coc] start cancelled");
+}
+
+function startMatch(): void {
+  phase = "live";
+  for (const p of players.values()) spawnSquad(p); // join order = deterministic spawn order
+  for (const p of players.values()) {
+    if (p.ws) send(p.ws, { t: "start", yourSoldierIds: p.soldierIds });
+  }
+  lobbyBroadcast();
+  console.log(`[coc] match live: ${players.size} players`);
 }
 
 function reap(player: Player): void {
@@ -147,6 +236,20 @@ function send(ws: WebSocket, msg: ServerMsg): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+function lobbyBroadcast(): void {
+  const roster = [...players.values()].map((p) => ({
+    id: p.id, name: p.name, team: p.team, archetype: p.archetype,
+    ready: p.ready, connected: p.ws !== null,
+  }));
+  for (const p of players.values()) {
+    if (!p.ws) continue;
+    send(p.ws, {
+      t: "lobby", phase, yourId: p.id, players: roster,
+      countdown: phase === "starting" ? countdown : undefined,
+    });
+  }
+}
+
 // fixed-timestep loop with drift correction
 let last = performance.now();
 let acc = 0;
@@ -156,6 +259,7 @@ setInterval(() => {
   last = now;
   while (acc >= TICK_MS) {
     acc -= TICK_MS;
+    if (phase !== "live") continue; // sim starts with the match
     const orders = pendingOrders.splice(0);
     if (orders.length > 0) replay.events.push({ t: state.tick, orders });
     const ev = tick(state, orders);

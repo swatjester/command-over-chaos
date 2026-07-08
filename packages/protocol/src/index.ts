@@ -6,6 +6,7 @@ export const MoveModeSchema = z.enum(["sprint", "move", "sneak", "crawl"]);
 export const StanceSchema = z.enum(["stand", "crouch", "prone"]);
 export const WeaponIdSchema = z.enum(["carbine", "smg", "dmr", "lmg", "carbine_gl"]);
 export const GrenadeKindSchema = z.enum(["frag", "smoke"]);
+export const ArchetypeSchema = z.enum(["infantry", "rangers", "recon"]);
 
 export const OrderSchema = z.discriminatedUnion("type", [
   z.object({
@@ -59,10 +60,19 @@ export const ClientMsgSchema = z.discriminatedUnion("t", [
     t: z.literal("join"),
     name: z.string().min(1).max(24),
     token: z.string().max(64).optional(),
-    archetype: z.enum(["infantry", "rangers", "recon"]).optional(),
+    archetype: ArchetypeSchema.optional(),
   }),
   z.object({ t: z.literal("orders"), orders: z.array(OrderSchema).max(32) }),
   z.object({ t: z.literal("ping"), n: z.number().int() }),
+  // lobby actions: set your slot, ready up, or request an early start
+  z.object({
+    t: z.literal("lobby"),
+    team: z.union([z.literal(0), z.literal(1)]).optional(),
+    archetype: ArchetypeSchema.optional(),
+    ready: z.boolean().optional(),
+    name: z.string().min(1).max(24).optional(),
+    start: z.boolean().optional(),
+  }),
 ]);
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;
 
@@ -138,7 +148,29 @@ export const BoomSchema = z.object({
   kind: GrenadeKindSchema,
 });
 
+export const LobbyPlayerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  team: z.union([z.literal(0), z.literal(1)]),
+  archetype: ArchetypeSchema,
+  ready: z.boolean(),
+  connected: z.boolean(),
+});
+
 export const ServerMsgSchema = z.discriminatedUnion("t", [
+  // lobby state — sent to everyone on every lobby change and countdown tick
+  z.object({
+    t: z.literal("lobby"),
+    phase: z.enum(["lobby", "starting", "live"]),
+    yourId: z.string(),
+    countdown: z.number().int().optional(),
+    players: z.array(LobbyPlayerSchema),
+  }),
+  // the match begins: your squad now exists
+  z.object({
+    t: z.literal("start"),
+    yourSoldierIds: z.array(z.number().int()),
+  }),
   z.object({
     t: z.literal("welcome"),
     playerId: z.string(),
@@ -162,6 +194,8 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("pong"), n: z.number().int() }),
 ]);
 export type ServerMsg = z.infer<typeof ServerMsgSchema>;
+export type LobbyPlayer = z.infer<typeof LobbyPlayerSchema>;
+export type Archetype = z.infer<typeof ArchetypeSchema>;
 export type SoldierSnapshot = z.infer<typeof SoldierSnapshotSchema>;
 export type ShotEvent = z.infer<typeof ShotEventSchema>;
 export type GrenadeSnapshot = z.infer<typeof GrenadeSnapshotSchema>;
