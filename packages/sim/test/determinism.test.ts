@@ -764,3 +764,21 @@ describe("cover-quality tiers (I-004)", () => {
     expect(f?.mult).toBe(40);
   });
 });
+
+
+describe("veterancy pips (M3 slice)", () => {
+  it("a kill grants a pip and the pip raises shot %", () => {
+    const state = createState(3);
+    const a = spawnSoldier(state, 0, 10 * MM, 10 * MM);
+    const b = spawnSoldier(state, 1, 12 * MM, 10 * MM);
+    b.hp = 1; // one hit downs
+    const before = computeShotPct(state.obstacles, a, b, []).pct;
+    for (let t = 0; t < 600 && a.pips === 0; t++) tick(state, []);
+    expect(a.pips).toBe(1);
+    const c = spawnSoldier(state, 1, 12 * MM, 10 * MM);
+    const after = computeShotPct(state.obstacles, a, c, []);
+    expect(after.factors.find((f) => f.label === "veteran")?.mult).toBe(104);
+    expect(after.pct).toBeGreaterThanOrEqual(before);
+    expect(a.pips).toBeLessThanOrEqual(3);
+  });
+});

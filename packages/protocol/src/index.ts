@@ -105,6 +105,7 @@ export const SoldierSnapshotSchema = z.object({
   aidProgress: z.number().int(),
   revived: z.boolean(),
   peekUp: z.boolean(),
+  pips: z.number().int(),
   vaultT: z.number().int(),
   vaultX: z.number().int(),
   vaultY: z.number().int(),

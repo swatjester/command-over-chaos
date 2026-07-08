@@ -68,6 +68,9 @@ export interface Soldier {
   revived: boolean;
   /** currently peeking over adjacent low cover / through a window to aim */
   peekUp: boolean;
+  /** in-match veterancy: pips earned per kill (max 3), +4% accuracy each.
+   *  Resets every match by construction — no meta progression. */
+  pips: number;
   /** ticks remaining in a vault over low cover (0 = not vaulting) */
   vaultT: number;
   /** vault landing point (valid while vaultT > 0) */
@@ -123,7 +126,7 @@ export function spawnSoldier(
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
     queue: [], frags, smokes, holdFire: false, leanX: 0, leanY: 0,
     down: false, bleed: 0, aidId: null, aidProgress: 0, revived: false, peekUp: false,
-    vaultT: 0, vaultX: 0, vaultY: 0,
+    pips: 0, vaultT: 0, vaultX: 0, vaultY: 0,
   };
   s.soldiers.push(soldier);
   return soldier;

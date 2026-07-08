@@ -26,6 +26,8 @@ export interface Combatant {
   peekUp: boolean;
   /** mid-vault over low cover: can't fire, fully exposed (optional: old snapshots) */
   vaultT?: number;
+  /** in-match veterancy pips (0-3), +4% accuracy each */
+  pips?: number;
 }
 
 /** A peeking-over prone soldier presents a crouch-sized profile and is not hidden. */
@@ -94,6 +96,7 @@ export function computeShotPct(
   };
 
   apply("shooter stance", shooter.stance === "prone" ? 115 : shooter.stance === "crouch" ? 108 : 100);
+  if ((shooter.pips ?? 0) > 0) apply("veteran", 100 + 4 * Math.min(3, shooter.pips!));
   if (shooter.tx !== null) {
     apply("shooter moving", shooter.moveMode === "sprint" ? 35 : shooter.moveMode === "move" ? 60 : shooter.moveMode === "sneak" ? 75 : 65);
   }

@@ -38,7 +38,7 @@ export function hashState(state: SimState): number {
     mix(s.down ? 1 : 0); mix(s.bleed);
     mix(s.aidId ?? -1); mix(s.aidProgress);
     mix(s.revived ? 1 : 0); mix(s.peekUp ? 1 : 0);
-    mix(s.vaultT); mix(s.vaultX); mix(s.vaultY);
+    mix(s.pips); mix(s.vaultT); mix(s.vaultX); mix(s.vaultY);
     mix(s.queue.length);
     for (const [qx, qy] of s.queue) { mix(qx); mix(qy); }
   }

@@ -353,6 +353,11 @@ export function App(): JSX.Element {
             <div style={{ fontSize: 11, opacity: 0.75, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ opacity: 0.8 }}>
                 [{i + 1}] {WEAPONS[s.weapon].name.toUpperCase()}
+                {s.alive && s.pips > 0 && (
+                  <span style={{ color: "#ffd27d", letterSpacing: -1 }} title={`veteran: +${s.pips * 4}% accuracy (${s.pips} kill${s.pips > 1 ? "s" : ""})`}>
+                    {" "}{"▲".repeat(s.pips)}
+                  </span>
+                )}
                 {s.alive && s.holdFire && <span style={{ color: "#e6b45a", fontWeight: 700 }}> HOLD</span>}
                 {s.alive && s.revived && <span style={{ color: "#e66a5a", fontWeight: 700 }} title="already revived — next down is fatal"> ✚</span>}
               </span>

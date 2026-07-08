@@ -411,6 +411,8 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       if (target.hp <= 0) {
         woundOut(target); // downs, or kills outright if already revived once
         kill = true;
+        // veterancy: surviving fights makes you steadier (CoC rank pips)
+        shooter.pips = Math.min(3, shooter.pips + 1);
       }
     }
     if (target.alive && !target.down) {
