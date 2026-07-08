@@ -8,7 +8,7 @@ import * as THREE from "three";
 import type {
   Boom, GrenadeSnapshot, ShotEvent, SmokeSnapshot, SoldierSnapshot,
 } from "@coc/protocol";
-import { ACTIVE_MAP, TICK_RATE } from "@coc/sim";
+import { ACTIVE_MAP, TICK_RATE, VAULT_TICKS } from "@coc/sim";
 
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch
 
@@ -93,6 +93,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   grid.position.set(MAP_W / 2, 0.01, MAP_H / 2);
   scene.add(grid);
 
+  // --- enterable buildings: roof slabs + cutaway fading -----------------------
+  interface BuildingViz { rect: [number, number, number, number]; mats: THREE.Material[]; roofMats: THREE.Material[]; fade: number; }
+  const buildings: BuildingViz[] = (ACTIVE_MAP.buildings ?? []).map((b) => ({
+    rect: [b.x - 300, b.y - 300, b.x + b.w + 300, b.y + b.h + 300],
+    mats: [], roofMats: [], fade: 1,
+  }));
+  function buildingAt(xMm: number, yMm: number): BuildingViz | null {
+    for (const b of buildings) {
+      if (xMm > b.rect[0] && xMm < b.rect[2] && yMm > b.rect[1] && yMm < b.rect[3]) return b;
+    }
+    return null;
+  }
+
   const KIND_MATS = {
     wall: new THREE.MeshStandardMaterial({ color: 0x8a7f6a, roughness: 0.9 }),
     stone: new THREE.MeshStandardMaterial({ color: 0x8d939a, roughness: 0.85 }),
@@ -105,13 +118,24 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   for (const o of ACTIVE_MAP.obstacles) {
     const w = o.w / 1000, d = o.h / 1000, ht = o.ht / 1000;
     const cx = o.x / 1000 + w / 2, cz = o.y / 1000 + d / 2;
+    // building walls get their own material clone so the whole structure
+    // can fade for the interior cutaway
+    const bviz = o.ht > 1200 || o.kind === "window" ? buildingAt(o.x + o.w / 2, o.y + o.h / 2) : null;
+    const bmat = (base: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial => {
+      if (!bviz) return base;
+      const m = base.clone();
+      m.transparent = true;
+      bviz.mats.push(m);
+      return m;
+    };
     if (o.kind === "window") {
       // sill + lintel with an open firing gap between
-      const sill = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), KIND_MATS.wall);
+      const wm = bmat(KIND_MATS.wall);
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, d), wm);
       sill.position.set(cx, 0.5, cz);
       sill.castShadow = true;
       sill.receiveShadow = true;
-      const lintel = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), KIND_MATS.wall);
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), wm);
       lintel.position.set(cx, 2.45, cz);
       lintel.castShadow = true;
       scene.add(sill, lintel);
@@ -128,11 +152,21 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       scene.add(trunk, leaves);
       continue;
     }
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), KIND_MATS[o.kind]);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, ht, d), bmat(KIND_MATS[o.kind]));
     m.position.set(cx, ht / 2, cz);
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
+  }
+  // roof slabs (fade out when anyone you can see is inside)
+  for (const b of ACTIVE_MAP.buildings ?? []) {
+    const viz = buildingAt(b.x + b.w / 2, b.y + b.h / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x46413a, roughness: 0.9, transparent: true });
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(b.w / 1000 + 0.4, 0.22, b.h / 1000 + 0.4), mat);
+    roof.position.set(b.x / 1000 + b.w / 2000, 3.12, b.y / 1000 + b.h / 2000);
+    roof.castShadow = true;
+    scene.add(roof);
+    viz?.roofMats.push(mat);
   }
 
   // --- soldiers ---------------------------------------------------------------
@@ -173,6 +207,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     g.add(figure, ring);
     g.userData.bodyMat = bodyMat;
     g.userData.lean = new THREE.Vector3(0, 0, 0);
+    g.userData.baseEmissive = { color: bodyMat.emissive.getHex(), intensity: bodyMat.emissiveIntensity };
+    g.userData.flash = 0;
     return g;
   }
 
@@ -202,7 +238,15 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
         soldierGroup.add(g);
         g.position.set(s.x / 1000, 0, s.y / 1000);
       }
-      g.userData.target = new THREE.Vector3(s.x / 1000, 0, s.y / 1000);
+      if (s.vaultT > 0) {
+        // climb animation: glide from takeoff to landing with a hop arc
+        const prog = (VAULT_TICKS - s.vaultT) / VAULT_TICKS;
+        const vx = s.x / 1000 + (s.vaultX / 1000 - s.x / 1000) * prog;
+        const vz = s.y / 1000 + (s.vaultY / 1000 - s.y / 1000) * prog;
+        g.userData.target = new THREE.Vector3(vx, Math.sin(Math.PI * prog) * 0.75, vz);
+      } else {
+        g.userData.target = new THREE.Vector3(s.x / 1000, 0, s.y / 1000);
+      }
       (g.userData.lean as THREE.Vector3).set(s.leanX / 1000, 0, s.leanY / 1000);
       const ring = g.getObjectByName("selection") as THREE.Mesh;
       (ring.material as THREE.MeshBasicMaterial).opacity = selSet.has(s.id) && s.alive ? 0.9 : 0;
@@ -236,6 +280,14 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     for (const [id, g] of soldierMeshes) {
       g.visible = seen.has(id) || mySet.has(id);
     }
+    // cutaway: fade any building that someone you can see is inside
+    const occupied = new Set<BuildingViz>();
+    for (const s of soldiers) {
+      if (!s.alive) continue;
+      const b = buildingAt(s.x, s.y);
+      if (b) occupied.add(b);
+    }
+    for (const b of buildings) b.fade = occupied.has(b) ? 1 : 0;
     // ghost lifecycle: enemy alive last frame, gone this frame -> marker;
     // reappears -> marker cleared
     for (const [id, last] of prev) {
@@ -256,22 +308,38 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     }
   }
 
-  // --- tracers ----------------------------------------------------------------
-  const tracers: Array<{ line: THREE.Line; ttl: number; max: number }> = [];
+  // --- gunfire readability (I-004): fat tracers, muzzle flash, damage flash ---
+  const tracers: Array<{ mesh: THREE.Mesh; ttl: number; max: number }> = [];
+  const flashes: Array<{ mesh: THREE.Mesh; ttl: number; max: number }> = [];
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.95 });
   function addShotEvents(shots: ShotEvent[]): void {
     for (const e of shots) {
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(e.sx / 1000, 1.3, e.sy / 1000),
-        new THREE.Vector3(e.tx / 1000, 1.1, e.ty / 1000),
-      ]);
-      const mat = new THREE.LineBasicMaterial({
-        color: e.kill ? 0xff5544 : e.hit ? 0xffd27d : 0x8fa3b8,
-        transparent: true,
-        opacity: 0.9,
-      });
-      const line = new THREE.Line(geo, mat);
-      scene.add(line);
-      tracers.push({ line, ttl: 0.25, max: 0.25 });
+      const a = new THREE.Vector3(e.sx / 1000, 1.3, e.sy / 1000);
+      const b = new THREE.Vector3(e.tx / 1000, 1.1, e.ty / 1000);
+      const len = a.distanceTo(b);
+      // beam: a thin stretched box reads at any zoom (Line is 1px)
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.09, len),
+        new THREE.MeshBasicMaterial({
+          color: e.kill ? 0xff5544 : e.hit ? 0xffc46b : 0xaebccb,
+          transparent: true,
+          opacity: e.hit ? 0.95 : 0.75,
+        }),
+      );
+      mesh.position.copy(a).lerp(b, 0.5);
+      mesh.lookAt(b);
+      scene.add(mesh);
+      tracers.push({ mesh, ttl: e.hit ? 0.42 : 0.34, max: e.hit ? 0.42 : 0.34 });
+      // muzzle flash at the shooter
+      const fl = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), flashMat.clone());
+      fl.position.copy(a);
+      scene.add(fl);
+      flashes.push({ mesh: fl, ttl: 0.09, max: 0.09 });
+      // damage flash on the victim (if rendered)
+      if (e.hit) {
+        const tg = soldierMeshes.get(e.target);
+        if (tg) tg.userData.flash = 0.35;
+      }
     }
   }
 
@@ -541,12 +609,55 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       const tr = tracers[i]!;
       tr.ttl -= dt;
       if (tr.ttl <= 0) {
-        scene.remove(tr.line);
-        tr.line.geometry.dispose();
-        (tr.line.material as THREE.Material).dispose();
+        scene.remove(tr.mesh);
+        tr.mesh.geometry.dispose();
+        (tr.mesh.material as THREE.Material).dispose();
         tracers.splice(i, 1);
       } else {
-        (tr.line.material as THREE.LineBasicMaterial).opacity = 0.9 * (tr.ttl / tr.max);
+        (tr.mesh.material as THREE.MeshBasicMaterial).opacity *= Math.max(0, tr.ttl / tr.max);
+      }
+    }
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      const fl = flashes[i]!;
+      fl.ttl -= dt;
+      if (fl.ttl <= 0) {
+        scene.remove(fl.mesh);
+        fl.mesh.geometry.dispose();
+        (fl.mesh.material as THREE.Material).dispose();
+        flashes.splice(i, 1);
+      } else {
+        const p = fl.ttl / fl.max;
+        fl.mesh.scale.setScalar(0.6 + (1 - p) * 1.4);
+        (fl.mesh.material as THREE.MeshBasicMaterial).opacity = 0.95 * p;
+      }
+    }
+    // damage flash: victims light up red for a beat
+    for (const g of soldierMeshes.values()) {
+      const f = g.userData.flash as number;
+      const mat = g.userData.bodyMat as THREE.MeshStandardMaterial;
+      const base = g.userData.baseEmissive as { color: number; intensity: number };
+      if (f > 0) {
+        g.userData.flash = Math.max(0, f - dt);
+        mat.emissive.setHex(0xff2a2a);
+        mat.emissiveIntensity = 1.2 * (g.userData.flash / 0.35);
+        if (g.userData.flash === 0) {
+          mat.emissive.setHex(base.color);
+          mat.emissiveIntensity = base.intensity;
+        }
+      }
+    }
+    // building cutaway fade
+    for (const b of buildings) {
+      const wallTarget = b.fade === 1 ? 0.35 : 1;
+      const roofTarget = b.fade === 1 ? 0.1 : 1;
+      for (const m of b.mats) {
+        const mm = m as THREE.MeshStandardMaterial;
+        mm.opacity += (wallTarget - mm.opacity) * Math.min(1, dt * 8);
+      }
+      for (const m of b.roofMats) {
+        const mm = m as THREE.MeshStandardMaterial;
+        mm.opacity += (roofTarget - mm.opacity) * Math.min(1, dt * 8);
+        mm.visible = mm.opacity > 0.12;
       }
     }
     for (const [id, gh] of ghosts) {

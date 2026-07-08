@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
 import { ACTIVE_MAP, computeShotPct, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
 import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
+import { dist } from "@coc/sim";
 import { connect, type Connection, type SnapshotData } from "./game/net.js";
 import { createScene, type SceneApi } from "./game/scene.js";
 
@@ -26,6 +27,8 @@ export function App(): JSX.Element {
   armedRef.current = armed;
   const snapRef = useRef<SnapshotData | null>(null);
   snapRef.current = snap;
+  /** last time each of my soldiers took incoming fire (I-004 readability) */
+  const underFireRef = useRef<Map<number, number>>(new Map());
 
   useEffect(() => {
     if (!archetype) return;
@@ -47,6 +50,9 @@ export function App(): JSX.Element {
       setMyIds(conn.mySoldierIds);
       setSelected(conn.mySoldierIds.slice(0, 1));
       conn.onSnapshot((data) => {
+        for (const sh of data.shots) {
+          if (conn.mySoldierIds.includes(sh.target)) underFireRef.current.set(sh.target, Date.now());
+        }
         setSnap(data);
         scene.updateSoldiers(data.soldiers, conn.mySoldierIds, selectedRef.current);
         scene.updateEffects({ grenades: data.grenades, smokes: data.smokes, booms: data.booms, tick: data.tick });
@@ -73,7 +79,16 @@ export function App(): JSX.Element {
       scene.onGroundLeftClick((x, y) => {
         const kind = armedRef.current;
         if (!kind) return;
-        const thrower = aliveSelected().find((s) => (kind === "frag" ? s.frags : s.smokes) > 0);
+        // multi-select throw doctrine: closest-to-target throws, but a
+        // selected grenadier whose GL validly reaches the point takes over
+        const canThrow = aliveSelected().filter(
+          (s) => (kind === "frag" ? s.frags : s.smokes) > 0 && s.vaultT === 0,
+        );
+        const glValid = canThrow.filter(
+          (s) => s.weapon === "carbine_gl" && dist(s.x, s.y, x, y) <= 45000,
+        );
+        const pool = glValid.length > 0 ? glValid : canThrow;
+        const thrower = pool.sort((a, b) => dist(a.x, a.y, x, y) - dist(b.x, b.y, x, y))[0];
         if (thrower) conn.sendOrders([{ type: "throw", soldierId: thrower.id, kind, x, y }]);
         setArmed(null);
       });
@@ -202,7 +217,7 @@ export function App(): JSX.Element {
         fontFamily: "system-ui, sans-serif", color: "#dfe7ee",
       }}>
         <div style={{ fontWeight: 700, letterSpacing: 2, fontSize: 14 }}>
-          {GAME_NAME.toUpperCase()} <span style={{ opacity: 0.45 }}>M1</span>
+          {GAME_NAME.toUpperCase()} <span style={{ opacity: 0.45 }}>M2.1</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignSelf: "center" }}>
           {armed && (
@@ -234,8 +249,8 @@ export function App(): JSX.Element {
         }}>
           {shooters.map((sh) => {
             const shot = computeShotPct(ACTIVE_MAP.obstacles, sh, hoverTarget, snap?.smokes ?? []);
-            const label = !shot.visible ? "NO LOS" : !shot.inRange ? "RANGE" : shot.settling ? "SETTLING…" : `${shot.pct}%`;
-            const color = !shot.visible || !shot.inRange ? "#8b98a5" : shot.settling ? "#e6b45a"
+            const label = !shot.visible ? "NO LOS" : !shot.inRange ? "RANGE" : shot.settling ? "SETTLING…" : shot.vaulting ? "VAULTING" : `${shot.pct}%`;
+            const color = !shot.visible || !shot.inRange ? "#8b98a5" : shot.settling || shot.vaulting ? "#e6b45a"
               : shot.pct >= 60 ? "#5fd68a" : shot.pct >= 30 ? "#e6b45a" : "#e66a5a";
             return (
               <div key={sh.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, lineHeight: 1.8 }}>
@@ -264,7 +279,10 @@ export function App(): JSX.Element {
         position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
         display: "flex", gap: 8, fontFamily: "system-ui, sans-serif",
       }}>
-        {mySoldiers.map((s, i) => (
+        {mySoldiers.map((s, i) => {
+          const underFire = s.alive && !s.down &&
+            Date.now() - (underFireRef.current.get(s.id) ?? 0) < 2000;
+          return (
           <button
             key={s.id}
             onClick={() => s.alive && setSelected([s.id])}
@@ -273,8 +291,9 @@ export function App(): JSX.Element {
               cursor: s.alive ? "pointer" : "default",
               textAlign: "left", color: "#dfe7ee",
               background: !s.alive ? "#191214e6" : selSet.has(s.id) ? "#1d2a3a" : "#141a21e6",
-              border: selSet.has(s.id) && s.alive ? "1px solid #4da3ff" : "1px solid #2a3138",
+              border: underFire ? "1px solid #e64a3a" : selSet.has(s.id) && s.alive ? "1px solid #4da3ff" : "1px solid #2a3138",
               opacity: s.alive ? 1 : 0.6,
+              boxShadow: underFire ? "0 0 10px #e64a3a88" : undefined,
             }}
           >
             <div style={{ fontSize: 11, opacity: 0.75, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -285,6 +304,7 @@ export function App(): JSX.Element {
               </span>
               {!s.alive ? <span style={{ color: "#e66a5a", fontWeight: 700 }}>KIA</span>
                 : s.down ? <span style={{ color: "#e6b45a", fontWeight: 700 }}>DOWN</span>
+                : underFire ? <span style={{ color: "#ff5544", fontWeight: 800, fontSize: 10 }}>⚠ UNDER FIRE</span>
                 : <StanceIcon stance={s.stance} />}
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
@@ -301,12 +321,14 @@ export function App(): JSX.Element {
                 {!s.alive ? "—"
                   : s.down ? "bleeding out — right-click with an ally to revive"
                   : s.aidId !== null ? `aiding #${s.aidId} (${Math.round((s.aidProgress / 150) * 100)}%)`
+                  : s.vaultT > 0 ? "vaulting…"
                   : `${s.moveMode}${s.tx !== null ? " · moving" : ""}${s.suppression > 70 ? " · PINNED" : ""}`}
               </span>
               {s.alive && <span style={{ opacity: 0.9 }}>Q×{s.frags} E×{s.smokes}</span>}
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {/* help */}
