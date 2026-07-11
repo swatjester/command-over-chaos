@@ -29,6 +29,8 @@ export function App(): JSX.Element {
   );
   const [name, setName] = useState<string>(storedName());
   const [myIds, setMyIds] = useState<number[]>([]);
+  const myIdsRef = useRef<number[]>([]);
+  myIdsRef.current = myIds;
   const [selected, setSelected] = useState<number[]>([]);
   const [armed, setArmed] = useState<GrenadeKind | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -154,14 +156,29 @@ export function App(): JSX.Element {
 
     const onKey = (e: KeyboardEvent): void => {
       const key = e.key.toLowerCase();
+      // shift+1-4: reassign the selected soldier's hotkey slot (swap)
+      if (e.shiftKey) {
+        const di = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
+        if (di >= 0 && selectedRef.current.length === 1) {
+          const sid = selectedRef.current[0]!;
+          setMyIds((ids) => {
+            const cur = ids.indexOf(sid);
+            if (cur < 0 || di >= ids.length || cur === di) return ids;
+            const next = [...ids];
+            [next[cur], next[di]] = [next[di]!, next[cur]!];
+            return next;
+          });
+          return;
+        }
+      }
       const idx = ["1", "2", "3", "4"].indexOf(e.key);
       if (idx >= 0) {
-        const id = conn.mySoldierIds[idx];
+        const id = myIdsRef.current[idx];
         if (id !== undefined) setSelected([id]);
         return;
       }
       if (e.key === "`") { // select the whole squad
-        setSelected([...conn.mySoldierIds]);
+        setSelected([...myIdsRef.current]);
         return;
       }
       if (e.key === "Escape") {
@@ -303,6 +320,24 @@ export function App(): JSX.Element {
         </div>
       </div>
 
+      {/* deploy countdown */}
+      {snap && snap.deploy > 0 && (
+        <div style={{
+          position: "absolute", top: 52, left: "50%", transform: "translateX(-50%)",
+          background: "#0d1218ee", border: "1px solid #e6b45a", borderRadius: 10,
+          padding: "12px 22px", fontFamily: "system-ui, sans-serif", color: "#dfe7ee",
+          textAlign: "center", pointerEvents: "none",
+        }}>
+          <div style={{ fontWeight: 800, fontSize: 22, color: "#e6b45a", letterSpacing: 2 }}>
+            DEPLOY — {Math.ceil(snap.deploy / 30)}
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4, lineHeight: 1.6 }}>
+            give your opening orders — nothing moves until the countdown ends<br />
+            select a soldier + shift+1–4 to reassign hotkeys
+          </div>
+        </div>
+      )}
+
       {/* bootcamp overlay */}
       {scenario === "bootcamp" && <Bootcamp snap={snap} myIds={myIds} />}
 
@@ -409,7 +444,7 @@ export function App(): JSX.Element {
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
         left-click: select · drag: box select · right-click: move / fire / revive ally · shift+right-click: queue<br />
-        `: select squad · 1–4: soldier · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
+        `: select squad · 1–4: soldier · shift+1–4: reassign hotkey · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
         WASD: pan · wheel: zoom · middle-drag: rotate
       </div>
     </div>

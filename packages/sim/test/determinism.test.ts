@@ -5,6 +5,8 @@ import {
   rngInt, spawnSoldier, tick, VAULT_TICKS, WEAPONS,
   type MapDef, type Order, type OrderLog,
 } from "../src/index.js";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { DEPLOY_TICKS } from "../src/index.js";
 
 function runScenario(seed: number, ticks: number, orders: OrderLog): number {
   const state = createState(seed);
@@ -228,7 +230,7 @@ describe("settle (long-range aim)", () => {
   it("long-range shots require stillness; settled shooter fires", () => {
     const s = createState(21); // empty map, open ground
     const sniper = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
-    spawnSoldier(s, 1, 10 * MM, 80 * MM, "carbine"); // 70m: beyond dmr settleStart (56m), within maxRange
+    spawnSoldier(s, 1, 10 * MM, 95 * MM, "carbine"); // 85m: beyond dmr settleStart (82m), within maxRange (130m)
     let fired = 0;
     for (let i = 0; i < 59; i++) fired += tick(s, []).shots.length; // settleTicks=60 not yet reached
     expect(fired).toBe(0);
@@ -493,17 +495,17 @@ describe("pathfinding", () => {
   it("routes around the farmstead maison and is deterministic", () => {
     const run = (): number => {
       const s = createState(71, FARMSTEAD_MAP);
-      spawnSoldier(s, 0, 75 * MM, 10 * MM); // north of maison
-      tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]); // south of it
+      spawnSoldier(s, 0, 150 * MM, 55 * MM); // north of maison
+      tick(s, [{ type: "move", soldierId: 0, x: 150 * MM, y: 95 * MM, mode: "sprint" }]); // south of it
       for (let i = 0; i < 3000; i++) tick(s, []);
       return hashState(s);
     };
     const s = createState(71, FARMSTEAD_MAP);
-    const sol = spawnSoldier(s, 0, 75 * MM, 10 * MM);
-    tick(s, [{ type: "move", soldierId: 0, x: 75 * MM, y: 40 * MM, mode: "sprint" }]);
+    const sol = spawnSoldier(s, 0, 150 * MM, 55 * MM);
+    tick(s, [{ type: "move", soldierId: 0, x: 150 * MM, y: 95 * MM, mode: "sprint" }]);
     for (let i = 0; i < 3000; i++) tick(s, []);
-    expect(sol.x).toBe(75 * MM);
-    expect(sol.y).toBe(40 * MM); // arrived (used to wedge on the north wall)
+    expect(sol.x).toBe(150 * MM);
+    expect(sol.y).toBe(95 * MM); // arrived (used to wedge on the north wall)
     expect(run()).toBe(run());
   });
 
@@ -627,10 +629,10 @@ describe("revive once", () => {
 describe("windows + peek-over", () => {
   it("windows allow fire with cover; prone-behind-window is hidden until they aim", () => {
     const s = createState(94, FARMSTEAD_MAP);
-    // maison north window at x 73..76, y ~14; defender inside behind it
-    const defender = spawnSoldier(s, 0, 74500, 15200, "carbine");
+    // maison north window at x 148..151, y ~64; defender inside behind it
+    const defender = spawnSoldier(s, 0, 149500, 65200, "carbine");
     defender.stance = "prone";
-    const attacker = spawnSoldier(s, 1, 74500, 8 * MM, "carbine");
+    const attacker = spawnSoldier(s, 1, 149500, 58 * MM, "carbine");
     // tucked prone behind the window: hidden
     expect(losBetween(s.obstacles, attacker, defender).visible).toBe(false);
     // once they aim through it (peekUp), they present a crouch profile
@@ -708,9 +710,14 @@ describe("vault links", () => {
   it("a vaulting soldier cannot fire and presents a standing profile", () => {
     const state = createState(1, fenceMap("fence"));
     const a = spawnSoldier(state, 0, 50 * MM, 45 * MM);
-    spawnSoldier(state, 1, 50 * MM, 70 * MM);
+    const e = spawnSoldier(state, 1, 50 * MM, 70 * MM);
+    // truce so suppression can't pin the vaulter mid-approach (halved move
+    // speeds doubled the approach time) — this test is about the vault
+    a.holdFire = true;
+    e.holdFire = true;
     tick(state, [{ type: "move", soldierId: 0, x: 50 * MM, y: 55 * MM }]);
-    while (a.vaultT === 0) tick(state, []);
+    for (let t = 0; t < 600 && a.vaultT === 0; t++) tick(state, []);
+    expect(a.vaultT).toBeGreaterThan(0);
     const shot = computeShotPct(state.obstacles, a, state.soldiers[1]!, []);
     expect(shot.vaulting).toBe(true);
     expect(shot.pct).toBe(0);
@@ -903,5 +910,68 @@ describe("bot AI", () => {
     const o1 = botThink(build(), 0, [0, 1, 2, 3], "balanced", createBotMemory());
     const o2 = botThink(build(), 0, [0, 1, 2, 3], "balanced", createBotMemory());
     expect(JSON.stringify(o1)).toBe(JSON.stringify(o2));
+  });
+});
+
+
+describe("map integrity", () => {
+  it("farmstead obstacles never overlap (no clipping)", () => {
+    const obs = FARMSTEAD_MAP.obstacles;
+    const bad: string[] = [];
+    for (let i = 0; i < obs.length; i++) {
+      for (let j = i + 1; j < obs.length; j++) {
+        const a = obs[i]!, b = obs[j]!;
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+          bad.push(`${a.kind}@(${a.x / 1000},${a.y / 1000}) x ${b.kind}@(${b.x / 1000},${b.y / 1000})`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("farmstead is 300x300 with 10 named zones and clear spawns", () => {
+    expect(FARMSTEAD_MAP.w).toBe(300000);
+    expect(FARMSTEAD_MAP.h).toBe(300000);
+    expect(FARMSTEAD_MAP.zones!.map((z) => z.name)).toContain("Parking");
+    expect(FARMSTEAD_MAP.zones!.length).toBe(10);
+    for (const side of FARMSTEAD_MAP.spawns) {
+      for (const [x, y] of side) expect(blocked(FARMSTEAD_MAP.obstacles, x, y)).toBe(false);
+    }
+  });
+
+  it("zone centers are reachable from both spawns (A* on the real map)", async () => {
+    const { findPath } = await import("../src/path.js");
+    for (const z of FARMSTEAD_MAP.zones!) {
+      for (const side of FARMSTEAD_MAP.spawns) {
+        const [sx, sy] = side[1]!;
+        const path = findPath(FARMSTEAD_MAP.obstacles, FARMSTEAD_MAP.w, FARMSTEAD_MAP.h, sx, sy, z.x, z.y);
+        expect(path, `${z.name} unreachable`).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("deploy phase", () => {
+  it("orders queue visibly but nothing moves/fires until the countdown ends", () => {
+    const state = createState(1, zoneMap());
+    const a = spawnSoldier(state, 0, 10 * MM, 10 * MM);
+    const e = spawnSoldier(state, 1, 20 * MM, 10 * MM); // in carbine range, clear LOS
+    void e;
+    state.deploy = 60;
+    tick(state, [{ type: "move", soldierId: 0, x: 40 * MM, y: 10 * MM, mode: "sprint" }]);
+    expect(a.tx).not.toBeNull(); // order visible (path drawn client-side)
+    for (let t = 0; t < 59; t++) tick(state, []);
+    expect(a.x).toBe(10 * MM); // frozen
+    expect(a.hp).toBe(100);    // nobody fired
+    expect(state.deploy).toBe(0);
+    for (let t = 0; t < 30; t++) tick(state, []);
+    expect(a.x).toBeGreaterThan(10 * MM); // now it moves
+  });
+
+  it("deploy is hashed and replayable", () => {
+    const mk = (d: number) => { const s = createState(5, zoneMap()); s.deploy = d; return hashState(s); };
+    expect(mk(450)).toBe(mk(450));
+    expect(mk(450)).not.toBe(mk(0));
+    expect(DEPLOY_TICKS).toBe(450);
   });
 });

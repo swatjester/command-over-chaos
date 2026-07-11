@@ -8,7 +8,7 @@
 import { blocked, blockedEx, type Obstacle } from "./map.js";
 
 const CELL = 1000; // mm
-const MAX_EXPANSIONS = 30000;
+const MAX_EXPANSIONS = 120000;
 /** extra A* cost for crossing a vaultable cell (vs 100/cell walking) */
 const VAULT_COST = 350;
 

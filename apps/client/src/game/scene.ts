@@ -42,14 +42,14 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x11151a);
-  scene.fog = new THREE.Fog(0x11151a, 160, 320);
+  scene.fog = new THREE.Fog(0x11151a, 320, 800);
 
   // --- camera ---------------------------------------------------------------
   const MAP_W = ACTIVE_MAP.w / 1000;
   const MAP_H = ACTIVE_MAP.h / 1000;
   const camera = new THREE.OrthographicCamera();
   const camTarget = new THREE.Vector3(MAP_W / 2, 0, MAP_H / 2);
-  let viewSize = 55;
+  let viewSize = 70;
   let yaw = Math.PI / 4;
   function layoutCamera(): void {
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
@@ -72,12 +72,14 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   // --- lights ---------------------------------------------------------------
   scene.add(new THREE.HemisphereLight(0x8899bb, 0x223311, 0.55));
   const sun = new THREE.DirectionalLight(0xfff2dd, 1.6);
-  sun.position.set(60, 80, 20);
+  sun.position.set(MAP_W / 2 + 80, 110, MAP_H / 2 + 30);
+  sun.target.position.set(MAP_W / 2, 0, MAP_H / 2);
   sun.castShadow = true;
-  sun.shadow.camera.left = -110; sun.shadow.camera.right = 110;
-  sun.shadow.camera.top = 110; sun.shadow.camera.bottom = -110;
-  sun.shadow.mapSize.set(2048, 2048);
-  scene.add(sun);
+  const shadowR = Math.max(MAP_W, MAP_H) * 0.62;
+  sun.shadow.camera.left = -shadowR; sun.shadow.camera.right = shadowR;
+  sun.shadow.camera.top = shadowR; sun.shadow.camera.bottom = -shadowR;
+  sun.shadow.mapSize.set(4096, 4096);
+  scene.add(sun, sun.target);
 
   // --- map from sim data (what you see is what collides) ---------------------
   const ground = new THREE.Mesh(
@@ -107,6 +109,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     return null;
   }
 
+  // ground decals (parking lot gravel etc.) — under everything else
+  const PATCH_COLORS = { gravel: 0x6f6a60, dirt: 0x6b5a43 } as const;
+  for (const pt of ACTIVE_MAP.patches ?? []) {
+    const patch = new THREE.Mesh(
+      new THREE.PlaneGeometry(pt.w / 1000, pt.h / 1000),
+      new THREE.MeshStandardMaterial({ color: PATCH_COLORS[pt.kind], roughness: 1.0 }),
+    );
+    patch.rotation.x = -Math.PI / 2;
+    patch.position.set(pt.x / 1000 + pt.w / 2000, 0.015, pt.y / 1000 + pt.h / 2000);
+    patch.receiveShadow = true;
+    scene.add(patch);
+  }
+
   const KIND_MATS = {
     wall: new THREE.MeshStandardMaterial({ color: 0x8a7f6a, roughness: 0.9 }),
     stone: new THREE.MeshStandardMaterial({ color: 0x8d939a, roughness: 0.85 }),
@@ -115,6 +130,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     shed: new THREE.MeshStandardMaterial({ color: 0x5f5648, roughness: 0.9 }),
     trunk: new THREE.MeshStandardMaterial({ color: 0x4a3826, roughness: 1.0 }),
     leaf: new THREE.MeshStandardMaterial({ color: 0x3e5f34, roughness: 1.0 }),
+    truck: new THREE.MeshStandardMaterial({ color: 0x4a5340, roughness: 0.6, metalness: 0.2 }),
+    car: new THREE.MeshStandardMaterial({ color: 0x5a6a75, roughness: 0.5, metalness: 0.3 }),
+    tire: new THREE.MeshStandardMaterial({ color: 0x1a1c1e, roughness: 1.0 }),
+    glass: new THREE.MeshStandardMaterial({ color: 0x2d3f4d, roughness: 0.2, metalness: 0.4 }),
   } as const;
   for (const o of ACTIVE_MAP.obstacles) {
     const w = o.w / 1000, d = o.h / 1000, ht = o.ht / 1000;
@@ -140,6 +159,36 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       lintel.position.set(cx, 2.45, cz);
       lintel.castShadow = true;
       scene.add(sill, lintel);
+      continue;
+    }
+    if (o.kind === "truck" || o.kind === "car") {
+      // vehicles: body + cab/cabin along the long axis
+      const along = w >= d; // long axis is x?
+      const L = along ? w : d, W2 = along ? d : w;
+      const bodyH = o.kind === "truck" ? 1.3 : 0.8;
+      const topH = o.kind === "truck" ? 1.3 : 0.6;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w, bodyH, d), KIND_MATS[o.kind]);
+      body.position.set(cx, bodyH / 2 + 0.25, cz);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      // top box: truck = cargo bed cover on the rear 60%; car = cabin middle 55%
+      const topL = L * (o.kind === "truck" ? 0.55 : 0.55);
+      const topOff = o.kind === "truck" ? -L * 0.18 : 0;
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(along ? topL : W2 * 0.9, topH, along ? W2 * 0.9 : topL),
+        o.kind === "truck" ? KIND_MATS.truck : KIND_MATS.glass,
+      );
+      top.position.set(cx + (along ? topOff : 0), bodyH + 0.25 + topH / 2, cz + (along ? 0 : topOff));
+      top.castShadow = true;
+      // four tire hints
+      for (const [tx, tz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]] as Array<[number, number]>) {
+        const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.25, 10), KIND_MATS.tire);
+        tire.rotation.z = Math.PI / 2;
+        tire.rotation.y = along ? 0 : Math.PI / 2;
+        tire.position.set(cx + tx * (along ? L : W2) * 0.3, 0.28, cz + tz * (along ? W2 : L) * (along ? 0.45 : 0.3));
+        scene.add(tire);
+      }
+      scene.add(body, top);
       continue;
     }
     if (o.kind === "tree") {
@@ -181,6 +230,23 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     capping: number; // -1 or capping team
   }
   const zoneViz: ZoneViz[] = [];
+  function makeLabel(text: string): THREE.Sprite {
+    const cv = document.createElement("canvas");
+    cv.width = 512; cv.height = 96;
+    const ctx = cv.getContext("2d")!;
+    ctx.font = "700 44px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeStyle = "#0d1218";
+    ctx.lineWidth = 8;
+    ctx.strokeText(text, 256, 48);
+    ctx.fillStyle = "#dfe7ee";
+    ctx.fillText(text, 256, 48);
+    const tex = new THREE.CanvasTexture(cv);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.85 }));
+    sp.scale.set(13, 2.4, 1);
+    return sp;
+  }
   for (const z of ACTIVE_MAP.zones ?? []) {
     const zx = z.x / 1000, zz = z.y / 1000, zr = z.r / 1000;
     const ringMat = new THREE.MeshBasicMaterial({ color: ZONE_NEUTRAL, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
@@ -200,7 +266,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     const flagR = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.85), flagRMat);
     flagL.position.set(zx + 0.47, 4.6, zz);
     flagR.position.set(zx + 1.27, 4.6, zz);
-    scene.add(ring, pole, flagL, flagR);
+    const label = makeLabel(z.name);
+    label.position.set(zx, 6.8, zz);
+    scene.add(ring, pole, flagL, flagR, label);
     zoneViz.push({ ring: ringMat, flagL: flagLMat, flagR: flagRMat, contested: false, capping: -1 });
   }
 
@@ -622,7 +690,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   window.addEventListener("keydown", (e) => keys.add(e.key.toLowerCase()));
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
   canvas.addEventListener("wheel", (e) => {
-    viewSize = Math.min(95, Math.max(12, viewSize + Math.sign(e.deltaY) * 4));
+    viewSize = Math.min(175, Math.max(12, viewSize + Math.sign(e.deltaY) * 6));
     layoutCamera();
   }, { passive: true });
 

@@ -27,7 +27,7 @@ export interface TickEvents {
   booms: Boom[];
 }
 
-const MAX_QUEUE = 64; // waypoints (pathfinding legs included)
+const MAX_QUEUE = 256; // waypoints (cross-map routes on the 300m map)
 
 /** Route a move order: A* waypoints, falling back to a straight line. */
 function route(state: SimState, fx: number, fy: number, tx: number, ty: number): Array<[number, number]> {
@@ -193,6 +193,14 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
         s.aidProgress = 0;
         break;
     }
+  }
+
+  // DEPLOY: orders were applied (paths/targets/stances visible on the map),
+  // but the world holds its breath until the countdown ends.
+  if (state.deploy > 0) {
+    state.deploy -= 1;
+    state.tick += 1;
+    return { shots: [], booms: [] };
   }
 
   // 2. movement with AABB collision + wall slide over pathfound waypoints

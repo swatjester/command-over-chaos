@@ -12,12 +12,12 @@ const SEEDS = Number(process.env.SEEDS ?? 100);
 
 function run(seed, flip) {
   const s = createState(seed, FARMSTEAD_MAP);
-  const yA = flip ? 95 : 55, yB = flip ? 55 : 95;
-  for (let i = 0; i < 4; i++) spawnSoldier(s, 0, (70 + i * 3) * MM, yA * MM, W[i]);
-  for (let i = 0; i < 4; i++) spawnSoldier(s, 1, (70 + i * 3) * MM, yB * MM, W[i]);
+  const yA = flip ? 170 : 130, yB = flip ? 130 : 170;
+  for (let i = 0; i < 4; i++) spawnSoldier(s, 0, (144 + i * 3) * MM, yA * MM, W[i]);
+  for (let i = 0; i < 4; i++) spawnSoldier(s, 1, (144 + i * 3) * MM, yB * MM, W[i]);
   tick(s, s.soldiers.map((x) => ({
     type: "move", soldierId: x.id, x: x.x,
-    y: ((x.team === 0) !== flip ? 73 : 77) * MM, mode: "sprint",
+    y: ((x.team === 0) !== flip ? 148 : 152) * MM, mode: "sprint",
   })));
   for (let i = 0; i < 6000; i++) tick(s, []);
   const a = s.soldiers.filter((x) => x.team === 0 && x.alive).length;

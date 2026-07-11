@@ -10,8 +10,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  ACTIVE_MAP, botThink, createBotMemory, createState, hashState, losBetween,
-  MM, spawnSoldier, tick, TICK_MS, TICK_RATE,
+  ACTIVE_MAP, botThink, createBotMemory, createState, DEPLOY_TICKS, hashState,
+  losBetween, MM, spawnSoldier, tick, TICK_MS, TICK_RATE,
   type Boom, type BotMemory, type BotPersonality, type Order, type ShotEvent,
   type Soldier, type WeaponId,
 } from "@coc/sim";
@@ -39,6 +39,7 @@ const replay = {
   version: 1,
   seed,
   map: "farmstead",
+  deploy: DEPLOY_TICKS, // verify.mjs must arm the same countdown
   startedAt: new Date().toISOString(),
   events: [] as ReplayEvent[],
 };
@@ -251,6 +252,7 @@ function cancelCountdown(): void {
 
 function startMatch(): void {
   phase = "live";
+  state.deploy = DEPLOY_TICKS; // 15s: give initial orders, nothing moves
   for (const p of players.values()) spawnSquad(p); // join order = deterministic spawn order
   for (const p of players.values()) {
     if (p.ws) send(p.ws, { t: "start", yourSoldierIds: p.soldierIds });
@@ -339,8 +341,8 @@ function broadcast(): void {
   const grenades = state.grenades;
   const smokes = state.smokes;
   const byTeam: Record<0 | 1, string> = {
-    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp } satisfies ServerMsg),
-    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp } satisfies ServerMsg),
+    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy } satisfies ServerMsg),
+    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy } satisfies ServerMsg),
   };
   for (const p of players.values()) {
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(byTeam[p.team]);

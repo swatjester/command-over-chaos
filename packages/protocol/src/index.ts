@@ -218,6 +218,8 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
     zones: z.array(ZoneSnapshotSchema),
     /** victory points per team */
     vp: z.tuple([z.number().int(), z.number().int()]),
+    /** pre-match deploy ticks remaining (0 = live) */
+    deploy: z.number().int(),
   }),
   z.object({ t: z.literal("pong"), n: z.number().int() }),
 ]);

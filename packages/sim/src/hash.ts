@@ -54,5 +54,6 @@ export function hashState(state: SimState): number {
     mix(z.owner + 1); mix(z.capTeam + 1); mix(z.capTicks); mix(z.contested ? 1 : 0);
   }
   mix(state.vp[0]); mix(state.vp[1]);
+  mix(state.deploy);
   return h >>> 0;
 }

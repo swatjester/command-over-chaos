@@ -77,7 +77,7 @@ const BLOCKED: SegResult = { visible: false, targetInCover: false, coverMult: 10
 export function coverQuality(kind: Obstacle["kind"]): number {
   switch (kind) {
     case "window": return 40;   // hard frame: only head+shoulders exposed
-    case "wall": case "stone": case "shed": return 50;  // solid masonry/timber
+    case "wall": case "stone": case "shed": case "truck": case "car": return 50;  // solid mass
     case "hay": case "tree": return 55; // soft/organic bulk
     case "fence": return 65;    // slat fence: concealment more than cover
     default: return 55;

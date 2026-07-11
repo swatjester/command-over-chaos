@@ -18,6 +18,9 @@ export const AID_RANGE = 1600;
 export const REVIVE_HP = 25;
 /** Sole occupancy for this long takes a zone's flag (3s). */
 export const CAP_TICKS = 90;
+/** Pre-match deploy window (15s): orders can be given and queue up
+ *  visually, but nothing moves, fires, bleeds, or captures. */
+export const DEPLOY_TICKS = 450;
 /** Climbing thin low cover takes 1s: stationary, exposed, can't fire. */
 export const VAULT_TICKS = 30;
 /** How far past cover a vault can land (mm). */
@@ -106,14 +109,19 @@ export interface SimState {
   zones: ZoneState[];
   /** victory points per team */
   vp: [number, number];
+  /** deploy countdown ticks remaining; sim is frozen (orders only) while > 0 */
+  deploy: number;
 }
 
-/** speed in mm per tick, by move mode (stance modifiers come later) */
+/** speed in mm per tick, by move mode (stance modifiers come later).
+ *  Halved 2026-07-08 — the game ran ~2x too fast; positioning should be a
+ *  deliberate act (Dan: "my guys are already dead before I get them in
+ *  position"). Re-judge TTK only after living with this pace. */
 export const MOVE_SPEED: Record<MoveMode, number> = {
-  sprint: Math.floor((6.0 * MM) / TICK_RATE),
-  move: Math.floor((3.2 * MM) / TICK_RATE),
-  sneak: Math.floor((1.6 * MM) / TICK_RATE),
-  crawl: Math.floor((0.7 * MM) / TICK_RATE),
+  sprint: Math.floor((3.0 * MM) / TICK_RATE),
+  move: Math.floor((1.6 * MM) / TICK_RATE),
+  sneak: Math.floor((0.8 * MM) / TICK_RATE),
+  crawl: Math.floor((0.35 * MM) / TICK_RATE),
 };
 
 export function createState(seed: number, map?: MapDef): SimState {
@@ -130,6 +138,7 @@ export function createState(seed: number, map?: MapDef): SimState {
     nextGrenadeId: 0,
     zones: (map?.zones ?? []).map((z) => ({ ...z, owner: -1, capTeam: -1, capTicks: 0, contested: false })),
     vp: [0, 0],
+    deploy: 0,
   };
 }
 

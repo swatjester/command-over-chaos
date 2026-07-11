@@ -13,6 +13,7 @@ const map = replay.map === "greybox" ? GREYBOX_MAP : FARMSTEAD_MAP;
 
 function run() {
   const state = createState(replay.seed, map);
+  if (replay.deploy) state.deploy = replay.deploy;
   const byTick = new Map();
   let maxTick = 0;
   for (const e of replay.events) {

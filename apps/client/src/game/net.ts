@@ -24,6 +24,8 @@ export interface SnapshotData {
   smokes: SmokeSnapshot[];
   zones: ZoneSnapshot[];
   vp: [number, number];
+  /** pre-match deploy ticks remaining (0 = live) */
+  deploy: number;
 }
 export type SnapshotCb = (data: SnapshotData) => void;
 
@@ -135,17 +137,17 @@ export function createOffline(
   const mine = ARCHETYPE_KITS[archetype];
   if (scenario === "bootcamp") {
     // your fireteam south of the courtyard; two hold-fire dummies to learn on
-    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 92 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
-    spawnSoldier(state, 1, 76 * MM, 74 * MM, "carbine", 0, 0);   // in the courtyard, near the well
-    spawnSoldier(state, 1, 75 * MM, 68 * MM, "carbine", 0, 0);   // behind the north courtyard wall
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (145 + i * 3) * MM, 170 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
+    spawnSoldier(state, 1, 151 * MM, 149 * MM, "carbine", 0, 0); // in the courtyard, near the well
+    spawnSoldier(state, 1, 150 * MM, 143 * MM, "carbine", 0, 0); // behind the north courtyard wall
     state.soldiers[4]!.holdFire = true;
     state.soldiers[5]!.holdFire = true;
     state.soldiers[5]!.stance = "crouch";
   } else {
     const theirs = ARCHETYPE_KITS.rangers;
     // offline practice: a BALANCED bot squad fights you for the map
-    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 92 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
-    for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 58 * MM, theirs[i]!.weapon as WeaponId, theirs[i]!.frags, theirs[i]!.smokes);
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (145 + i * 3) * MM, 170 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (145 + i * 3) * MM, 130 * MM, theirs[i]!.weapon as WeaponId, theirs[i]!.frags, theirs[i]!.smokes);
   }
   let pending: Order[] = [];
   let snapshotCb: SnapshotCb | null = null;
@@ -165,6 +167,7 @@ export function createOffline(
       smokes: structuredClone(state.smokes),
       zones: structuredClone(state.zones),
       vp: [state.vp[0], state.vp[1]],
+      deploy: state.deploy,
     });
   }, TICK_MS);
 

@@ -28,10 +28,15 @@ export interface WeaponDef {
   suppression: number;
 }
 
+/** Long-range doctrine (2026-07-08, for the 300x300 map): DMR keeps usable
+ *  accuracy way out but fires slow; LMG throws volume + suppression at low
+ *  per-shot odds. Both settle-gated. Carbine/SMG stay close-to-mid weapons.
+ *  Extreme-range potshot duels (1-5%/shot, both sides in cover) are a
+ *  FEATURE — classic CoC fights ran minutes before a kill. */
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
-  carbine_gl: { name: "Carbine (GL)", baseAcc: 80, falloffStart: 15000, maxRange: 60000, minAcc: 15, cooldown: 37, damage: 45, suppression: 14, settleStart: 38000, settleTicks: 20 },
-  carbine: { name: "Carbine", baseAcc: 80, falloffStart: 15000, maxRange: 60000, minAcc: 15, cooldown: 37, damage: 45, suppression: 14, settleStart: 38000, settleTicks: 20 },
+  carbine_gl: { name: "Carbine (GL)", baseAcc: 80, falloffStart: 15000, maxRange: 60000, minAcc: 10, cooldown: 37, damage: 45, suppression: 14, settleStart: 38000, settleTicks: 20 },
+  carbine: { name: "Carbine", baseAcc: 80, falloffStart: 15000, maxRange: 60000, minAcc: 10, cooldown: 37, damage: 45, suppression: 14, settleStart: 38000, settleTicks: 20 },
   smg:     { name: "SMG",     baseAcc: 85, falloffStart: 8000,  maxRange: 35000, minAcc: 8,  cooldown: 12, damage: 30, suppression: 10, settleStart: 22000, settleTicks: 15 },
-  dmr:     { name: "DMR",     baseAcc: 90, falloffStart: 30000, maxRange: 90000, minAcc: 35, cooldown: 46, damage: 70, suppression: 20, settleStart: 56000, settleTicks: 60 },
-  lmg:     { name: "LMG",     baseAcc: 65, falloffStart: 20000, maxRange: 70000, minAcc: 20, cooldown: 8,  damage: 35, suppression: 25, settleStart: 44000, settleTicks: 30 },
+  dmr:     { name: "DMR",     baseAcc: 90, falloffStart: 40000, maxRange: 130000, minAcc: 12, cooldown: 46, damage: 70, suppression: 22, settleStart: 82000, settleTicks: 60 },
+  lmg:     { name: "LMG",     baseAcc: 65, falloffStart: 25000, maxRange: 110000, minAcc: 5,  cooldown: 8,  damage: 35, suppression: 30, settleStart: 70000, settleTicks: 30 },
 };
