@@ -1,6 +1,6 @@
 # HANDOFF — Command over Chaos (CoC)
 
-_Session handoff, written 2026-07-02, fully updated 2026-07-08 (M2.1 close-out session). Read this + PLAN.md + ISSUES.md before doing anything._
+_Session handoff, written 2026-07-02, fully updated 2026-07-08 (M2.1 close-out + VP zones/bots). Read this + PLAN.md + ISSUES.md before doing anything._
 
 ## What this project is
 
@@ -17,7 +17,7 @@ A browser-based, modern-warfare multiplayer squad-tactics game — spiritual suc
 2. **Docs (PLAN.md, ISSUES.md, HANDOFF.md) are maintained in the mount AND the repo — the repo copies can LAG the mount** (found 2026-07-08: repo ISSUES.md was two fixes behind). Before editing a doc in the clone, `diff` it against the mount and reconcile from the mount version, then push and copy back to the mount so both match.
 3. **Git workflow:** clone lives in `/tmp/build` (scratch — may vanish; re-clone freely). `api.github.com` is proxy-blocked; `git` over HTTPS to `github.com` works. Dan supplies a **PAT** in chat when needed (needs `repo` + `workflow` scopes); set remote URL with token to clone/push, scrub after (`git remote set-url origin https://github.com/swatjester/command-over-chaos`). Never init git in the OneDrive folder.
 4. **pnpm is NOT preinstalled in the sandbox** and global npm installs are permission-blocked. Do: `npm config set prefix ~/.npm-global && npm i -g pnpm@9` then `export PATH=~/.npm-global/bin:$PATH` (re-export in every bash call — no env carryover).
-5. **Verify before every push:** `pnpm build`, `pnpm --filter @coc/sim test` (52 tests), `node tools/balance/mirror-battle.mjs` (fairness; `SEEDS=400` env scales the run), live ws smoke when netcode changed.
+5. **Verify before every push:** `pnpm build`, `pnpm --filter @coc/sim test` (60 tests), `node tools/balance/mirror-battle.mjs` (fairness; `SEEDS=400` env scales the run), live ws smoke when netcode changed.
 6. Background processes die between bash calls — run server+client smokes in a single call. Working pattern: a `.mjs` script that `spawn`s the server, connects `ws` clients (import from `/tmp/build/node_modules/.pnpm/ws@<version>/node_modules/ws/index.js` — check the version dir), validates messages with `ServerMsgSchema` from `packages/protocol/dist`, then kills the server. Lobby flow needs ~6s (join → ready → 3s countdown → snapshots).
 
 ## Architecture (monorepo, pnpm workspaces)
@@ -43,6 +43,8 @@ A browser-based, modern-warfare multiplayer squad-tactics game — spiritual suc
 - **Down/revive**: lethal small-arms/GL/outer-frag → DOWN (60s bleed); hand-frag-adjacent → dead; frag hits on downed → dead; aid order walks medic in, 5s adjacent stationary channel → 25hp, woozy; **one revive per soldier — second downing fatal** (✚ mark).
 - **Suppression**: pins >70 (crawl only); decays 1/tick. **Combat is two-phase simultaneous** (no id-order advantage; mutual kills possible).
 - **Veterancy pips** (M3 slice): a kill grants the shooter a pip (max 3), +4% accuracy each — visible "veteran" factor in the % breakdown, gold ▲ chevrons on the card. In-match only; resets every match by construction (no meta power — esports pillar).
+- **Victory-point zones** (2026-07-08, placements circled by Dan on a screenshot): 10 circular flagged zones on Farmstead (`zones` in map.ts — Maison/Church/Courtyard value 2; Barn/Hayfield/East Field/2 Orchards/2 small East Sheds value 1; N/S mirrored). Neutral at first; **sole** occupancy for CAP_TICKS (90 = 3s) captures; **any enemy inside = contested** (split flag, capture progress AND payout freeze); flag persists when the zone empties; downed soldiers neither hold nor contest. Owned+uncontested zones pay `value` VP/sec (tick % 30). Zone state + team VP are hashed and in every snapshot; client renders ground ring (pulses while capping/contested) + flag pole (gray/blue/orange, split when contested) + VP/flag-count HUD. **No win condition yet** — scores just accrue (match end = M3).
+- **Bot AI** (`packages/sim/src/ai.ts`, `botThink(state, team, ids, personality, mem)` — pure, deterministic, no RNG): personalities **vp** (best zone: contested > value > distance; fights only in self-defense), **hunter** (visible enemy → last-known positions → zone sweep), **balanced** (fights what it sees, caps otherwise). Perception = team LOS, same rule as fog culling (bots cannot wallhack). Movement in formation offsets, sprint >35m, halt+crouch to engage (fire-at-will does the shooting), buddy aid when quiet, anti-dither goal memory. **No grenades yet.** Server runs each bot every 30 ticks (staggered by botIdx*7) pushing into pendingOrders → recorded in replays like human orders (verify.mjs proven green on a bot match). Bots are Players with ws=null: always ready, never reaped, excluded from everyoneReady, counted for team-manning; added/removed via lobby msg `addBot`/`removeBot` (+🤖 buttons per team column; add works mid-match too, remove is lobby-only). Offline practice skirmish enemy = balanced bot (client runs botThink in net.ts).
 - **Controls**: left-click select, drag box-select, ` squad, 1–4 singles, right-click move/fire/revive, shift+right queue (pathfound), F sprint toggle, T hold-fire toggle (hold clears fire orders — "hold means STOP"; explicit target overrides posture), Z/X/C stance, H halt, Q/E grenades, Esc cancel, WASD/wheel/middle-drag camera.
 
 ## 2026-07-08 session log (commits f392539..3e626b4)
@@ -66,6 +68,8 @@ M0 ✓, M1 ✓, M2 core ✓, **M2.1 ✓ except 1v1-over-internet verification** 
 - Roof/cutaway is purely visual — sim LOS is still 2D; roofs never block sim sightlines (nothing shoots over a roof today anyway).
 - Vault landing waypoint-consumption is heuristic (see tick.ts); if soldiers ever ping-pong at a wall, look there first.
 - Lobby has no chat and no kick; name changes are lobby-phase only. Fine for playtests.
+- Bots don't throw grenades, don't vault deliberately (A* may route them over cover, which works), and don't retreat; hunter can tunnel-vision across the map. VP scores have no win condition yet. All intentional v1 — tune from playtests.
+- Zone capture radius/time/values are placeholder-tier like all balance data (zones in `map.ts`, CAP_TICKS in `state.ts`).
 - CI: GitHub Actions runs build+tests on push (pnpm version comes from packageManager field only).
 - Balance values are all placeholder-tier; live in `weapons.ts`/`grenades.ts`/`combat.ts` (cover tiers in `los.ts`) + `shared/fireteams.json` (M3 data).
 
