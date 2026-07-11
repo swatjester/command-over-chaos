@@ -1,6 +1,6 @@
 import type { Grenade } from "./grenades.js";
 import type { SmokeCloud } from "./los.js";
-import type { MapDef, Obstacle } from "./map.js";
+import type { MapDef, Obstacle, ZoneDef } from "./map.js";
 import { MM } from "./math.js";
 import type { WeaponId } from "./weapons.js";
 
@@ -16,6 +16,8 @@ export const AID_TICKS = 150; // 5s
 export const AID_RANGE = 1600;
 /** HP restored by a field revive. */
 export const REVIVE_HP = 25;
+/** Sole occupancy for this long takes a zone's flag (3s). */
+export const CAP_TICKS = 90;
 /** Climbing thin low cover takes 1s: stationary, exposed, can't fire. */
 export const VAULT_TICKS = 30;
 /** How far past cover a vault can land (mm). */
@@ -78,6 +80,18 @@ export interface Soldier {
   vaultY: number;
 }
 
+/** Live state of one victory-point zone. */
+export interface ZoneState extends ZoneDef {
+  /** -1 neutral, else owning team */
+  owner: number;
+  /** team currently capturing (-1 none) */
+  capTeam: number;
+  /** consecutive sole-occupancy ticks toward CAP_TICKS */
+  capTicks: number;
+  /** both teams inside the radius right now */
+  contested: boolean;
+}
+
 export interface SimState {
   tick: number;
   seed: number;
@@ -89,6 +103,9 @@ export interface SimState {
   grenades: Grenade[];
   smokes: SmokeCloud[];
   nextGrenadeId: number;
+  zones: ZoneState[];
+  /** victory points per team */
+  vp: [number, number];
 }
 
 /** speed in mm per tick, by move mode (stance modifiers come later) */
@@ -111,6 +128,8 @@ export function createState(seed: number, map?: MapDef): SimState {
     grenades: [],
     smokes: [],
     nextGrenadeId: 0,
+    zones: (map?.zones ?? []).map((z) => ({ ...z, owner: -1, capTeam: -1, capTicks: 0, contested: false })),
+    vp: [0, 0],
   };
 }
 

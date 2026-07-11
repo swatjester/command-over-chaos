@@ -22,6 +22,19 @@ export interface Obstacle {
  *  (roof + cutaway); carries no sim meaning. */
 export interface BuildingDef { name: string; x: number; y: number; w: number; h: number; }
 
+/** Victory-point capture zone: circular, flagged. Occupy it solely for
+ *  CAP_TICKS to take the flag; any enemy inside = contested. */
+export interface ZoneDef {
+  name: string;
+  /** center, mm */
+  x: number;
+  y: number;
+  /** radius, mm */
+  r: number;
+  /** VP per second while owned (uncontested) */
+  value: number;
+}
+
 export interface MapDef {
   w: number;
   h: number;
@@ -30,6 +43,8 @@ export interface MapDef {
   spawns: [Array<[number, number]>, Array<[number, number]>];
   /** enterable structures, for client roof/cutaway rendering */
   buildings?: BuildingDef[];
+  /** victory-point capture zones */
+  zones?: ZoneDef[];
 }
 
 export const SOLDIER_RADIUS = 350; // mm
@@ -246,6 +261,21 @@ function farmstead(): MapDef {
       { name: "church-nave", x: 66800, y: 103800, w: 16400, h: 36400 },
       { name: "church-transept", x: 54800, y: 115800, w: 40400, h: 12400 },
       { name: "barn", x: 18750, y: 49750, w: 14500, h: 24500 },
+    ],
+    // VP zones (locations circled by Dan on the 2026-07-08 screenshot).
+    // N/S mirror-balanced: maison<->church, barn<->hayfield, orchard pair,
+    // shed pair; courtyard + east field sit on the centerline.
+    zones: [
+      { name: "Maison", x: 75000, y: 25000, r: 12500, value: 2 },
+      { name: "Church", x: 75000, y: 122000, r: 13000, value: 2 },
+      { name: "Courtyard", x: 75000, y: 75000, r: 8000, value: 2 },
+      { name: "Barn", x: 26000, y: 62000, r: 10000, value: 1 },
+      { name: "Hayfield", x: 25500, y: 87500, r: 9000, value: 1 },
+      { name: "East Field", x: 124500, y: 75000, r: 9000, value: 1 },
+      { name: "North Orchard", x: 44000, y: 36500, r: 9000, value: 1 },
+      { name: "South Orchard", x: 44000, y: 114500, r: 9000, value: 1 },
+      { name: "North Shed", x: 133500, y: 40000, r: 4500, value: 1 },
+      { name: "South Shed", x: 133500, y: 110000, r: 4500, value: 1 },
     ],
     // out of weapon range (max 90m) and behind own building
     spawns: [

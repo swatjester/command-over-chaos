@@ -10,8 +10,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
 import {
-  ACTIVE_MAP, createState, hashState, losBetween, MM, spawnSoldier, tick,
-  TICK_MS, TICK_RATE, type Boom, type Order, type ShotEvent, type Soldier, type WeaponId,
+  ACTIVE_MAP, botThink, createBotMemory, createState, hashState, losBetween,
+  MM, spawnSoldier, tick, TICK_MS, TICK_RATE,
+  type Boom, type BotMemory, type BotPersonality, type Order, type ShotEvent,
+  type Soldier, type WeaponId,
 } from "@coc/sim";
 import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
 import { ARCHETYPE_KITS, DEFAULT_SERVER_PORT, type PlayableArchetype } from "@coc/shared";
@@ -63,6 +65,11 @@ interface Player {
   soldierIds: number[];
   ws: WebSocket | null;
   reapTimer: NodeJS.Timeout | null;
+  /** AI squad: always ready, never reaped, thinks once a second */
+  bot: boolean;
+  personality?: BotPersonality;
+  botMem?: BotMemory;
+  botIdx?: number;
 }
 const players = new Map<string, Player>(); // by token
 const byWs = new Map<WebSocket, Player>();
@@ -87,14 +94,22 @@ wss.on("connection", (ws) => {
         if (player.soldierIds.includes(o.soldierId)) pendingOrders.push(o);
       }
     } else if (msg.t === "lobby") {
-      if (!player || phase === "live") return;
-      if (msg.team !== undefined) { player.team = msg.team; player.ready = false; }
-      if (msg.archetype !== undefined) player.archetype = msg.archetype;
-      if (msg.name !== undefined) player.name = msg.name;
-      if (msg.ready !== undefined) player.ready = msg.ready;
-      if (phase === "starting" && !everyoneReady()) cancelCountdown();
-      if (msg.start && everyoneReady()) beginCountdown(); // explicit start: any team layout (solo testing)
-      else if (everyoneReady() && bothTeamsManned() && players.size >= 2) beginCountdown();
+      if (!player) return;
+      // bot management works in any phase (live adds spawn straight in)
+      if (msg.addBot) addBot(msg.addBot.team, msg.addBot.personality, msg.addBot.archetype);
+      if (msg.removeBot && phase !== "live") {
+        const b = [...players.values()].find((p) => p.id === msg.removeBot && p.bot);
+        if (b) { players.delete(b.token); console.log(`[coc] ${b.id} (bot) removed`); }
+      }
+      if (phase !== "live") {
+        if (msg.team !== undefined) { player.team = msg.team; player.ready = false; }
+        if (msg.archetype !== undefined) player.archetype = msg.archetype;
+        if (msg.name !== undefined) player.name = msg.name;
+        if (msg.ready !== undefined) player.ready = msg.ready;
+        if (phase === "starting" && !everyoneReady()) cancelCountdown();
+        if (msg.start && everyoneReady()) beginCountdown(); // explicit start: any team layout (solo testing)
+        else if (everyoneReady() && bothTeamsManned() && players.size >= 2) beginCountdown();
+      }
       lobbyBroadcast();
     } else if (msg.t === "ping") {
       send(ws, { t: "pong", n: msg.n });
@@ -120,9 +135,37 @@ wss.on("connection", (ws) => {
 });
 
 function everyoneReady(): boolean {
-  if (players.size === 0) return false;
-  for (const p of players.values()) if (!p.ready || !p.ws) return false;
-  return true;
+  let humans = 0;
+  for (const p of players.values()) {
+    if (p.bot) continue; // bots are always ready
+    humans += 1;
+    if (!p.ready || !p.ws) return false;
+  }
+  return humans > 0;
+}
+
+let nextBotNum = 0;
+const BOT_NAMES = ["Ajax", "Brick", "Cobra", "Dutch", "Echo", "Flint", "Gonzo", "Hawk"];
+function addBot(team: 0 | 1, personality: BotPersonality, archetype?: PlayableArchetype): void {
+  const n = nextBotNum++;
+  const bot: Player = {
+    id: `b${n}`,
+    token: `bot-${n}`,
+    name: `${BOT_NAMES[n % BOT_NAMES.length]} [BOT]`,
+    team,
+    archetype: archetype ?? (["infantry", "rangers", "recon"] as const)[n % 3]!,
+    ready: true,
+    soldierIds: [],
+    ws: null,
+    reapTimer: null,
+    bot: true,
+    personality,
+    botMem: createBotMemory(),
+    botIdx: n,
+  };
+  players.set(bot.token, bot);
+  console.log(`[coc] ${bot.id} (${bot.name}, ${personality}) added to team ${team}`);
+  if (phase === "live") spawnSquad(bot);
 }
 function bothTeamsManned(): boolean {
   let t0 = 0, t1 = 0;
@@ -147,7 +190,7 @@ function handleJoin(ws: WebSocket, token: string, name: string, archetype: Playa
     const team = (t0 <= t1 ? 0 : 1) as 0 | 1;
     player = {
       id: `p${nextPlayerNum++}`, token, name, team, archetype,
-      ready: false, soldierIds: [], ws, reapTimer: null,
+      ready: false, soldierIds: [], ws, reapTimer: null, bot: false,
     };
     players.set(token, player);
     byWs.set(ws, player);
@@ -239,7 +282,8 @@ function send(ws: WebSocket, msg: ServerMsg): void {
 function lobbyBroadcast(): void {
   const roster = [...players.values()].map((p) => ({
     id: p.id, name: p.name, team: p.team, archetype: p.archetype,
-    ready: p.ready, connected: p.ws !== null,
+    ready: p.ready, connected: p.bot || p.ws !== null,
+    bot: p.bot || undefined, personality: p.personality,
   }));
   for (const p of players.values()) {
     if (!p.ws) continue;
@@ -265,6 +309,13 @@ setInterval(() => {
     const ev = tick(state, orders);
     pendingShots.push(...ev.shots);
     pendingBooms.push(...ev.booms);
+    // bots think once a second (staggered), queueing orders for the next
+    // tick exactly like a player would — replays record them identically
+    for (const p of players.values()) {
+      if (!p.bot || p.soldierIds.length === 0) continue;
+      if ((state.tick + (p.botIdx ?? 0) * 7) % 30 !== 0) continue;
+      pendingOrders.push(...botThink(state, p.team, p.soldierIds, p.personality!, p.botMem!));
+    }
     if (state.tick % 3 === 0) broadcast(); // snapshots at 10Hz for M1/M2
   }
 }, 4);
@@ -288,8 +339,8 @@ function broadcast(): void {
   const grenades = state.grenades;
   const smokes = state.smokes;
   const byTeam: Record<0 | 1, string> = {
-    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes } satisfies ServerMsg),
-    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes } satisfies ServerMsg),
+    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp } satisfies ServerMsg),
+    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp } satisfies ServerMsg),
   };
   for (const p of players.values()) {
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(byTeam[p.team]);

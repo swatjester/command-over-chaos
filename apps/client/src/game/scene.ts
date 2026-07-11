@@ -6,7 +6,7 @@
  */
 import * as THREE from "three";
 import type {
-  Boom, GrenadeSnapshot, ShotEvent, SmokeSnapshot, SoldierSnapshot,
+  Boom, GrenadeSnapshot, ShotEvent, SmokeSnapshot, SoldierSnapshot, ZoneSnapshot,
 } from "@coc/protocol";
 import { ACTIVE_MAP, TICK_RATE, VAULT_TICKS } from "@coc/sim";
 
@@ -23,6 +23,7 @@ export interface SceneApi {
   updateSoldiers(soldiers: SoldierSnapshot[], mySoldierIds: number[], selectedIds: number[]): void;
   addShotEvents(shots: ShotEvent[]): void;
   updateEffects(fx: EffectsData): void;
+  updateZones(zones: ZoneSnapshot[]): void;
   onGroundClick(cb: (xMm: number, yMm: number, shift: boolean) => void): void;
   onGroundLeftClick(cb: (xMm: number, yMm: number) => void): void;
   onSoldierClick(cb: (id: number) => void): void;
@@ -167,6 +168,59 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     roof.castShadow = true;
     scene.add(roof);
     viz?.roofMats.push(mat);
+  }
+
+  // --- victory-point zones: ground ring + flag ---------------------------------
+  const ZONE_NEUTRAL = 0x8b98a5;
+  const ZONE_TEAM = [0x4da3ff, 0xff9e4d] as const;
+  interface ZoneViz {
+    ring: THREE.MeshBasicMaterial;
+    flagL: THREE.MeshBasicMaterial;
+    flagR: THREE.MeshBasicMaterial;
+    contested: boolean;
+    capping: number; // -1 or capping team
+  }
+  const zoneViz: ZoneViz[] = [];
+  for (const z of ACTIVE_MAP.zones ?? []) {
+    const zx = z.x / 1000, zz = z.y / 1000, zr = z.r / 1000;
+    const ringMat = new THREE.MeshBasicMaterial({ color: ZONE_NEUTRAL, transparent: true, opacity: 0.28, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(zr - 0.35, zr, 48), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(zx, 0.04, zz);
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, 5.2, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a4046, roughness: 0.7 }),
+    );
+    pole.position.set(zx, 2.6, zz);
+    pole.castShadow = true;
+    // flag: two half-panels so a contested flag splits blue/orange
+    const flagLMat = new THREE.MeshBasicMaterial({ color: ZONE_NEUTRAL, side: THREE.DoubleSide });
+    const flagRMat = new THREE.MeshBasicMaterial({ color: ZONE_NEUTRAL, side: THREE.DoubleSide });
+    const flagL = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.85), flagLMat);
+    const flagR = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.85), flagRMat);
+    flagL.position.set(zx + 0.47, 4.6, zz);
+    flagR.position.set(zx + 1.27, 4.6, zz);
+    scene.add(ring, pole, flagL, flagR);
+    zoneViz.push({ ring: ringMat, flagL: flagLMat, flagR: flagRMat, contested: false, capping: -1 });
+  }
+
+  function updateZones(zones: ZoneSnapshot[]): void {
+    for (let i = 0; i < zones.length && i < zoneViz.length; i++) {
+      const z = zones[i]!;
+      const v = zoneViz[i]!;
+      v.contested = z.contested;
+      v.capping = z.capTeam;
+      const ownerColor = z.owner >= 0 ? ZONE_TEAM[z.owner as 0 | 1] : ZONE_NEUTRAL;
+      if (z.contested) {
+        v.flagL.color.setHex(ZONE_TEAM[0]);
+        v.flagR.color.setHex(ZONE_TEAM[1]);
+        v.ring.color.setHex(0xffffff);
+      } else {
+        v.flagL.color.setHex(ownerColor);
+        v.flagR.color.setHex(ownerColor);
+        v.ring.color.setHex(z.capTeam >= 0 ? ZONE_TEAM[z.capTeam as 0 | 1] : ownerColor);
+      }
+    }
   }
 
   // --- soldiers ---------------------------------------------------------------
@@ -646,6 +700,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
         }
       }
     }
+    // contested / capturing zone rings pulse
+    const pulse = 0.28 + 0.22 * (0.5 + 0.5 * Math.sin(performance.now() / 180));
+    for (const v of zoneViz) {
+      v.ring.opacity = v.contested || v.capping >= 0 ? pulse : 0.28;
+    }
     // building cutaway fade
     for (const b of buildings) {
       const wallTarget = b.fade === 1 ? 0.35 : 1;
@@ -698,6 +757,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     updateSoldiers,
     addShotEvents,
     updateEffects,
+    updateZones,
     onGroundClick: (cb) => { groundCb = cb; },
     onGroundLeftClick: (cb) => { groundLeftCb = cb; },
     onSoldierClick: (cb) => { soldierCb = cb; },

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
 import { ACTIVE_MAP, computeShotPct, dist, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
 import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
+import type { BotPersonality } from "@coc/sim";
 import {
   connectOnline, createOffline,
   type Connection, type LobbyData, type OfflineScenario, type SnapshotData,
@@ -98,6 +99,7 @@ export function App(): JSX.Element {
       setSnap(data);
       scene.updateSoldiers(data.soldiers, conn.mySoldierIds, selectedRef.current);
       scene.updateEffects({ grenades: data.grenades, smokes: data.smokes, booms: data.booms, tick: data.tick });
+      scene.updateZones(data.zones);
       if (data.shots.length > 0) scene.addShotEvents(data.shots);
     });
     scene.onSoldierClick((id) => {
@@ -242,6 +244,8 @@ export function App(): JSX.Element {
         onTeam={(t) => connRef.current?.sendLobby({ team: t })}
         onReady={(r) => connRef.current?.sendLobby({ ready: r })}
         onStart={() => connRef.current?.sendLobby({ start: true })}
+        onAddBot={(team, personality) => connRef.current?.sendLobby({ addBot: { team, personality } })}
+        onRemoveBot={(id) => connRef.current?.sendLobby({ removeBot: id })}
       />
     );
   }
@@ -270,6 +274,15 @@ export function App(): JSX.Element {
         <div style={{ fontWeight: 700, letterSpacing: 2, fontSize: 14 }}>
           {GAME_NAME.toUpperCase()} <span style={{ opacity: 0.45 }}>M2.1</span>
         </div>
+        {snap && snap.zones.length > 0 && (
+          <div style={{ display: "flex", gap: 10, alignSelf: "center", fontSize: 14, fontWeight: 800 }}>
+            <span style={{ color: "#4da3ff" }}>{snap.vp[0]}</span>
+            <span style={{ opacity: 0.4, fontWeight: 400, fontSize: 11, alignSelf: "center" }}>
+              VP · {snap.zones.filter((z) => z.owner === 0).length}/{snap.zones.filter((z) => z.owner === 1).length} flags
+            </span>
+            <span style={{ color: "#ff9e4d" }}>{snap.vp[1]}</span>
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, alignSelf: "center" }}>
           {armed && (
             <div style={{
@@ -460,7 +473,7 @@ function ArchetypePicker({ archetype, onPick }: {
   );
 }
 
-function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onReady, onStart }: {
+function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onReady, onStart, onAddBot, onRemoveBot }: {
   lobby: LobbyData | null;
   name: string;
   archetype: PlayableArchetype;
@@ -469,6 +482,8 @@ function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onRe
   onTeam: (t: 0 | 1) => void;
   onReady: (r: boolean) => void;
   onStart: () => void;
+  onAddBot: (team: 0 | 1, personality: BotPersonality) => void;
+  onRemoveBot: (id: string) => void;
 }): JSX.Element {
   const me = lobby?.players.find((p) => p.id === lobby.yourId);
   const allReady = (lobby?.players.length ?? 0) > 0 && (lobby?.players.every((p) => p.ready) ?? false);
@@ -519,14 +534,45 @@ function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onRe
                   opacity: p.connected ? 1 : 0.45,
                 }}>
                   <span>
-                    {p.name}{p.id === lobby?.yourId ? " (you)" : ""}
-                    <span style={{ opacity: 0.5 }}> · {p.archetype}</span>
+                    {p.bot ? "🤖 " : ""}{p.name}{p.id === lobby?.yourId ? " (you)" : ""}
+                    <span style={{ opacity: 0.5 }}> · {p.bot ? `${p.personality} · ` : ""}{p.archetype}</span>
                   </span>
-                  <span style={{ color: p.ready ? "#5fd68a" : "#8b98a5", fontWeight: 700 }}>
-                    {p.ready ? "READY" : "…"}
+                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ color: p.ready ? "#5fd68a" : "#8b98a5", fontWeight: 700 }}>
+                      {p.ready ? "READY" : "…"}
+                    </span>
+                    {p.bot && (
+                      <button
+                        onClick={() => onRemoveBot(p.id)}
+                        title="remove bot"
+                        style={{
+                          background: "none", border: "none", color: "#e66a5a",
+                          cursor: "pointer", fontWeight: 800, fontSize: 12, padding: 0,
+                        }}
+                      >✕</button>
+                    )}
                   </span>
                 </div>
               ))}
+              <div style={{ display: "flex", gap: 4 }}>
+                {(["vp", "hunter", "balanced"] as BotPersonality[]).map((pers) => (
+                  <button
+                    key={pers}
+                    onClick={() => onAddBot(t, pers)}
+                    title={
+                      pers === "vp" ? "bot that prioritizes capturing victory points"
+                      : pers === "hunter" ? "bot that hunts the enemy team"
+                      : "bot that balances objectives and hunting"
+                    }
+                    style={{
+                      flex: 1, padding: "5px 0", borderRadius: 6, cursor: "pointer", fontSize: 10,
+                      background: "#10151b", border: "1px dashed #2a3138", color: "#8b98a5",
+                    }}
+                  >
+                    +🤖 {pers}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ))}

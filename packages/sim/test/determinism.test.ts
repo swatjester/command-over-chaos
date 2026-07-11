@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  blocked, computeShotPct, createState, dist, FARMSTEAD_MAP, GREYBOX_MAP,
-  hashState, losBetween, losBetweenEx, MM, rngInt, spawnSoldier, tick,
-  VAULT_TICKS, WEAPONS,
+  blocked, botThink, CAP_TICKS, computeShotPct, createBotMemory, createState,
+  dist, FARMSTEAD_MAP, GREYBOX_MAP, hashState, losBetween, losBetweenEx, MM,
+  rngInt, spawnSoldier, tick, VAULT_TICKS, WEAPONS,
   type MapDef, type Order, type OrderLog,
 } from "../src/index.js";
 
@@ -780,5 +780,128 @@ describe("veterancy pips (M3 slice)", () => {
     expect(after.factors.find((f) => f.label === "veteran")?.mult).toBe(104);
     expect(after.pct).toBeGreaterThanOrEqual(before);
     expect(a.pips).toBeLessThanOrEqual(3);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Victory-point zones
+// ---------------------------------------------------------------------------
+
+function zoneMap(): MapDef {
+  return {
+    w: 100 * MM, h: 100 * MM, obstacles: [],
+    spawns: [[[10 * MM, 10 * MM]], [[90 * MM, 90 * MM]]],
+    zones: [{ name: "Hill", x: 50 * MM, y: 50 * MM, r: 8 * MM, value: 2 }],
+  };
+}
+
+describe("victory-point zones", () => {
+  it("sole occupancy for CAP_TICKS captures a neutral flag; VP accrues", () => {
+    const state = createState(1, zoneMap());
+    spawnSoldier(state, 0, 50 * MM, 50 * MM);
+    expect(state.zones[0]!.owner).toBe(-1);
+    for (let t = 0; t < CAP_TICKS; t++) tick(state, []);
+    expect(state.zones[0]!.owner).toBe(0);
+    const vpAtCap = state.vp[0];
+    for (let t = 0; t < 90; t++) tick(state, []); // 3 more seconds
+    expect(state.vp[0]).toBe(vpAtCap + 6); // value 2 x 3s
+    expect(state.vp[1]).toBe(0);
+  });
+
+  it("any enemy inside makes the zone contested and freezes capture + payout", () => {
+    const state = createState(1, zoneMap());
+    const a = spawnSoldier(state, 0, 48 * MM, 50 * MM);
+    const b = spawnSoldier(state, 1, 52 * MM, 50 * MM);
+    a.holdFire = true; // truce: this test is about the flag, not the fight
+    b.holdFire = true;
+    for (let t = 0; t < CAP_TICKS * 3; t++) tick(state, []);
+    expect(state.zones[0]!.contested).toBe(true);
+    expect(state.zones[0]!.owner).toBe(-1);
+    expect(state.vp[0]).toBe(0);
+    expect(state.vp[1]).toBe(0);
+  });
+
+  it("flag persists when the zone empties; enemy retakes it by sole occupancy", () => {
+    const state = createState(1, zoneMap());
+    const a = spawnSoldier(state, 0, 50 * MM, 50 * MM);
+    for (let t = 0; t < CAP_TICKS; t++) tick(state, []);
+    expect(state.zones[0]!.owner).toBe(0);
+    // owner walks away — flag stays
+    tick(state, [{ type: "move", soldierId: a.id, x: 10 * MM, y: 10 * MM, mode: "sprint" }]);
+    for (let t = 0; t < 300; t++) tick(state, []);
+    expect(state.zones[0]!.owner).toBe(0);
+    // enemy moves in and flips it
+    const b = spawnSoldier(state, 1, 52 * MM, 50 * MM);
+    void b;
+    for (let t = 0; t < CAP_TICKS + 2; t++) tick(state, []);
+    expect(state.zones[0]!.owner).toBe(1);
+  });
+
+  it("downed soldiers do not hold or contest a zone", () => {
+    const state = createState(1, zoneMap());
+    const a = spawnSoldier(state, 0, 50 * MM, 50 * MM);
+    a.down = true;
+    a.bleed = 100000;
+    spawnSoldier(state, 1, 52 * MM, 50 * MM);
+    for (let t = 0; t < CAP_TICKS; t++) tick(state, []);
+    expect(state.zones[0]!.contested).toBe(false);
+    expect(state.zones[0]!.owner).toBe(1);
+  });
+
+  it("zones are hashed (owner flip changes the hash)", () => {
+    const a = createState(1, zoneMap());
+    const b = createState(1, zoneMap());
+    expect(hashState(a)).toBe(hashState(b));
+    b.zones[0]!.owner = 0;
+    expect(hashState(a)).not.toBe(hashState(b));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bot AI
+// ---------------------------------------------------------------------------
+
+describe("bot AI", () => {
+  it("vp bot pushes its squad into the zone and captures it", () => {
+    const state = createState(1, zoneMap());
+    const ids = [0, 1, 2, 3];
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (10 + i * 3) * MM, 10 * MM);
+    const mem = createBotMemory();
+    for (let t = 0; t < 3000; t++) {
+      const orders = t % 30 === 0 ? botThink(state, 0, ids, "vp", mem) : [];
+      tick(state, orders);
+      if (state.zones[0]!.owner === 0) break;
+    }
+    expect(state.zones[0]!.owner).toBe(0);
+  });
+
+  it("hunter bot closes on a visible enemy and kills it", () => {
+    const state = createState(1, zoneMap());
+    const ids = [0, 1, 2, 3];
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (10 + i * 3) * MM, 10 * MM);
+    const e = spawnSoldier(state, 1, 90 * MM, 90 * MM);
+    e.holdFire = true; // target dummy
+    const mem = createBotMemory();
+    let dead = false;
+    for (let t = 0; t < 6000 && !dead; t++) {
+      const orders = t % 30 === 0 ? botThink(state, 0, ids, "hunter", mem) : [];
+      tick(state, orders);
+      dead = !e.alive || e.down;
+    }
+    expect(dead).toBe(true);
+  });
+
+  it("botThink is deterministic: same state+mem => same orders", () => {
+    const build = () => {
+      const state = createState(7, zoneMap());
+      for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (10 + i * 3) * MM, 10 * MM);
+      spawnSoldier(state, 1, 60 * MM, 60 * MM);
+      for (let t = 0; t < 120; t++) tick(state, []);
+      return state;
+    };
+    const o1 = botThink(build(), 0, [0, 1, 2, 3], "balanced", createBotMemory());
+    const o2 = botThink(build(), 0, [0, 1, 2, 3], "balanced", createBotMemory());
+    expect(JSON.stringify(o1)).toBe(JSON.stringify(o2));
   });
 });

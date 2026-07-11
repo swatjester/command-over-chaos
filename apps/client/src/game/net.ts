@@ -5,13 +5,14 @@
  * Offline mode has no fog: you see both teams.
  */
 import {
-  ACTIVE_MAP, createState, MM, spawnSoldier, tick, TICK_MS,
-  type Order, type SimState, type WeaponId,
+  ACTIVE_MAP, botThink, createBotMemory, createState, MM, spawnSoldier, tick,
+  TICK_MS, type BotPersonality, type Order, type SimState, type WeaponId,
 } from "@coc/sim";
 import { ARCHETYPE_KITS, type PlayableArchetype } from "@coc/shared";
 import {
   ServerMsgSchema, type Boom, type ClientMsg, type GrenadeSnapshot,
   type LobbyPlayer, type ShotEvent, type SmokeSnapshot, type SoldierSnapshot,
+  type ZoneSnapshot,
 } from "@coc/protocol";
 
 export interface SnapshotData {
@@ -21,6 +22,8 @@ export interface SnapshotData {
   booms: Boom[];
   grenades: GrenadeSnapshot[];
   smokes: SmokeSnapshot[];
+  zones: ZoneSnapshot[];
+  vp: [number, number];
 }
 export type SnapshotCb = (data: SnapshotData) => void;
 
@@ -37,6 +40,8 @@ export interface LobbyAction {
   ready?: boolean;
   name?: string;
   start?: boolean;
+  addBot?: { team: 0 | 1; personality: BotPersonality; archetype?: PlayableArchetype };
+  removeBot?: string;
 }
 
 export interface Connection {
@@ -138,14 +143,18 @@ export function createOffline(
     state.soldiers[5]!.stance = "crouch";
   } else {
     const theirs = ARCHETYPE_KITS.rangers;
-    // offline demo: two fireteams face off across the central courtyard
-    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 55 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
-    for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 95 * MM, theirs[i]!.weapon as WeaponId, theirs[i]!.frags, theirs[i]!.smokes);
+    // offline practice: a BALANCED bot squad fights you for the map
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 0, (70 + i * 3) * MM, 92 * MM, mine[i]!.weapon as WeaponId, mine[i]!.frags, mine[i]!.smokes);
+    for (let i = 0; i < 4; i++) spawnSoldier(state, 1, (70 + i * 3) * MM, 58 * MM, theirs[i]!.weapon as WeaponId, theirs[i]!.frags, theirs[i]!.smokes);
   }
   let pending: Order[] = [];
   let snapshotCb: SnapshotCb | null = null;
+  const botMem = createBotMemory();
 
   const interval = setInterval(() => {
+    if (scenario === "skirmish" && state.tick % 30 === 0) {
+      pending.push(...botThink(state, 1, [4, 5, 6, 7], "balanced", botMem));
+    }
     const ev = tick(state, pending.splice(0));
     snapshotCb?.({
       soldiers: structuredClone(state.soldiers),
@@ -154,6 +163,8 @@ export function createOffline(
       booms: ev.booms,
       grenades: structuredClone(state.grenades),
       smokes: structuredClone(state.smokes),
+      zones: structuredClone(state.zones),
+      vp: [state.vp[0], state.vp[1]],
     });
   }, TICK_MS);
 

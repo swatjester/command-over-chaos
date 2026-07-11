@@ -50,5 +50,9 @@ export function hashState(state: SimState): number {
   for (const c of state.smokes) {
     mix(c.id); mix(c.x); mix(c.y); mix(c.r); mix(c.ttl);
   }
+  for (const z of state.zones) {
+    mix(z.owner + 1); mix(z.capTeam + 1); mix(z.capTicks); mix(z.contested ? 1 : 0);
+  }
+  mix(state.vp[0]); mix(state.vp[1]);
   return h >>> 0;
 }

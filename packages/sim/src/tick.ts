@@ -7,8 +7,8 @@ import { clamp, dist, stepToward } from "./math.js";
 import type { Order } from "./orders.js";
 import { rngInt } from "./rng.js";
 import {
-  AID_RANGE, AID_TICKS, BLEED_TICKS, MOVE_SPEED, PIN_THRESHOLD, REVIVE_HP,
-  VAULT_MAX, VAULT_TICKS,
+  AID_RANGE, AID_TICKS, BLEED_TICKS, CAP_TICKS, MOVE_SPEED, PIN_THRESHOLD,
+  REVIVE_HP, VAULT_MAX, VAULT_TICKS,
   type SimState, type Soldier,
 } from "./state.js";
 import { WEAPONS } from "./weapons.js";
@@ -436,6 +436,40 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
   // 6. suppression decay
   for (const s of state.soldiers) {
     if (s.suppression > 0) s.suppression -= 1;
+  }
+
+  // 7. victory-point zones: contest / capture / score
+  for (const z of state.zones) {
+    let c0 = 0, c1 = 0;
+    for (const s of state.soldiers) {
+      if (!s.alive || s.down) continue;
+      if (dist(s.x, s.y, z.x, z.y) <= z.r) s.team === 0 ? c0++ : c1++;
+    }
+    z.contested = c0 > 0 && c1 > 0;
+    if (z.contested) {
+      // progress freezes while contested — push them out to finish the cap
+    } else if (c0 > 0 || c1 > 0) {
+      const t = c0 > 0 ? 0 : 1;
+      if (z.owner === t) {
+        z.capTeam = -1;
+        z.capTicks = 0;
+      } else {
+        if (z.capTeam !== t) { z.capTeam = t; z.capTicks = 0; }
+        z.capTicks += 1;
+        if (z.capTicks >= CAP_TICKS) {
+          z.owner = t;
+          z.capTeam = -1;
+          z.capTicks = 0;
+        }
+      }
+    } else {
+      z.capTeam = -1;
+      z.capTicks = 0; // flag persists while empty
+    }
+    // owned + uncontested zones pay out once per second
+    if (z.owner >= 0 && !z.contested && state.tick % 30 === 0) {
+      state.vp[z.owner as 0 | 1] += z.value;
+    }
   }
 
   state.tick += 1;

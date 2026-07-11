@@ -7,6 +7,7 @@ export const StanceSchema = z.enum(["stand", "crouch", "prone"]);
 export const WeaponIdSchema = z.enum(["carbine", "smg", "dmr", "lmg", "carbine_gl"]);
 export const GrenadeKindSchema = z.enum(["frag", "smoke"]);
 export const ArchetypeSchema = z.enum(["infantry", "rangers", "recon"]);
+export const BotPersonalitySchema = z.enum(["vp", "hunter", "balanced"]);
 
 export const OrderSchema = z.discriminatedUnion("type", [
   z.object({
@@ -64,7 +65,7 @@ export const ClientMsgSchema = z.discriminatedUnion("t", [
   }),
   z.object({ t: z.literal("orders"), orders: z.array(OrderSchema).max(32) }),
   z.object({ t: z.literal("ping"), n: z.number().int() }),
-  // lobby actions: set your slot, ready up, or request an early start
+  // lobby actions: set your slot, ready up, manage bots, request an early start
   z.object({
     t: z.literal("lobby"),
     team: z.union([z.literal(0), z.literal(1)]).optional(),
@@ -72,6 +73,14 @@ export const ClientMsgSchema = z.discriminatedUnion("t", [
     ready: z.boolean().optional(),
     name: z.string().min(1).max(24).optional(),
     start: z.boolean().optional(),
+    /** add an AI squad to a team slot */
+    addBot: z.object({
+      team: z.union([z.literal(0), z.literal(1)]),
+      personality: BotPersonalitySchema,
+      archetype: ArchetypeSchema.optional(),
+    }).optional(),
+    /** remove a bot by its player id (lobby phase only) */
+    removeBot: z.string().optional(),
   }),
 ]);
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;
@@ -149,6 +158,19 @@ export const BoomSchema = z.object({
   kind: GrenadeKindSchema,
 });
 
+export const ZoneSnapshotSchema = z.object({
+  name: z.string(),
+  x: z.number().int(),
+  y: z.number().int(),
+  r: z.number().int(),
+  value: z.number().int(),
+  /** -1 neutral, else owning team */
+  owner: z.number().int(),
+  capTeam: z.number().int(),
+  capTicks: z.number().int(),
+  contested: z.boolean(),
+});
+
 export const LobbyPlayerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -156,6 +178,8 @@ export const LobbyPlayerSchema = z.object({
   archetype: ArchetypeSchema,
   ready: z.boolean(),
   connected: z.boolean(),
+  bot: z.boolean().optional(),
+  personality: BotPersonalitySchema.optional(),
 });
 
 export const ServerMsgSchema = z.discriminatedUnion("t", [
@@ -191,12 +215,16 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
     booms: z.array(BoomSchema),
     grenades: z.array(GrenadeSnapshotSchema),
     smokes: z.array(SmokeSnapshotSchema),
+    zones: z.array(ZoneSnapshotSchema),
+    /** victory points per team */
+    vp: z.tuple([z.number().int(), z.number().int()]),
   }),
   z.object({ t: z.literal("pong"), n: z.number().int() }),
 ]);
 export type ServerMsg = z.infer<typeof ServerMsgSchema>;
 export type LobbyPlayer = z.infer<typeof LobbyPlayerSchema>;
 export type Archetype = z.infer<typeof ArchetypeSchema>;
+export type ZoneSnapshot = z.infer<typeof ZoneSnapshotSchema>;
 export type SoldierSnapshot = z.infer<typeof SoldierSnapshotSchema>;
 export type ShotEvent = z.infer<typeof ShotEventSchema>;
 export type GrenadeSnapshot = z.infer<typeof GrenadeSnapshotSchema>;

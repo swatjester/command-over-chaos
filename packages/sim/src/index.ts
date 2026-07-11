@@ -10,3 +10,4 @@ export * from "./path.js";
 export * from "./combat.js";
 export * from "./tick.js";
 export * from "./hash.js";
+export * from "./ai.js";
