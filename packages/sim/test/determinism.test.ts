@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blocked, botThink, CAP_TICKS, computeShotPct, createBotMemory, createState,
-  dist, FARMSTEAD_MAP, GREYBOX_MAP, hashState, losBetween, losBetweenEx, MM,
+  dist, FARMSTEAD_MAP, findCoverSpot, GREYBOX_MAP, hashState, losBetween, losBetweenEx, MM,
   rngInt, spawnSoldier, tick, VAULT_TICKS, WEAPONS,
   type MapDef, type Order, type OrderLog,
 } from "../src/index.js";
@@ -1048,5 +1048,31 @@ describe("fire on the move (2026-07-08)", () => {
       if (!victim.alive || victim.down) break;
     }
     expect(peak).toBeGreaterThan(70); // pinned at least once within 30s
+  });
+});
+
+
+describe("cover-snap move assist", () => {
+  const wall = [{ x: 50 * MM, y: 50 * MM, w: 10 * MM, h: 400, ht: 1100, kind: "stone" as const }];
+
+  it("finds the nearest free spot hugging cover within 6m", () => {
+    const spot = findCoverSpot(wall, 52 * MM, 47 * MM, 6000, []);
+    expect(spot).not.toBeNull();
+    const [sx, sy] = spot!;
+    expect(dist(sx, sy, 52 * MM, 47 * MM)).toBeLessThanOrEqual(6000);
+    // hugging the wall's north face (800mm off)
+    expect(Math.abs(sy - (50 * MM - 800))).toBeLessThanOrEqual(1);
+    expect(blocked(wall, sx, sy)).toBe(false);
+  });
+
+  it("returns null when cover is more than 6m away", () => {
+    expect(findCoverSpot(wall, 52 * MM, 30 * MM, 6000, [])).toBeNull();
+  });
+
+  it("skips occupied spots", () => {
+    const first = findCoverSpot(wall, 52 * MM, 47 * MM, 6000, [])!;
+    const second = findCoverSpot(wall, 52 * MM, 47 * MM, 6000, [first])!;
+    expect(second).not.toBeNull();
+    expect(dist(first[0], first[1], second[0], second[1])).toBeGreaterThanOrEqual(900);
   });
 });

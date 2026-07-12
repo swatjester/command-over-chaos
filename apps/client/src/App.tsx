@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
-import { ACTIVE_MAP, computeShotPct, dist, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
+import { ACTIVE_MAP, computeShotPct, dist, findCoverSpot, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
 import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
 import type { BotPersonality } from "@coc/sim";
 import {
@@ -130,18 +130,26 @@ export function App(): JSX.Element {
       setSelected([id]);
     });
     scene.onGroundClick((x, y, shift) => {
-      // right-click ground: move orders for all selected, formation-offset from centroid
+      // right-click ground: move orders for all selected, formation-offset
+      // from centroid; squads seek nearby cover at the destination (within
+      // 6m, unoccupied) instead of standing in the open
       const sel = aliveSelected();
       if (sel.length === 0) return;
       const cx = Math.round(sel.reduce((a, s) => a + s.x, 0) / sel.length);
       const cy = Math.round(sel.reduce((a, s) => a + s.y, 0) / sel.length);
-      conn.sendOrders(sel.map((s) => ({
-        type: "move" as const,
-        soldierId: s.id,
-        x: x + (sel.length > 1 ? s.x - cx : 0),
-        y: y + (sel.length > 1 ? s.y - cy : 0),
-        queue: shift || undefined,
-      })));
+      const taken: Array<[number, number]> = (snapRef.current?.soldiers ?? [])
+        .filter((s) => s.alive && !selectedRef.current.includes(s.id))
+        .map((s) => [s.x, s.y]);
+      conn.sendOrders(sel.map((s) => {
+        let dx = x + (sel.length > 1 ? s.x - cx : 0);
+        let dy = y + (sel.length > 1 ? s.y - cy : 0);
+        if (sel.length > 1) {
+          const spot = findCoverSpot(ACTIVE_MAP.obstacles, dx, dy, 6000, taken);
+          if (spot) { dx = spot[0]; dy = spot[1]; }
+        }
+        taken.push([dx, dy]);
+        return { type: "move" as const, soldierId: s.id, x: dx, y: dy, queue: shift || undefined };
+      }));
     });
     scene.onGroundLeftClick((x, y) => {
       const kind = armedRef.current;

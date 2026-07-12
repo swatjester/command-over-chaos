@@ -97,11 +97,19 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   scene.add(grid);
 
   // --- enterable buildings: roof slabs + cutaway fading -----------------------
-  interface BuildingViz { rect: [number, number, number, number]; mats: THREE.Material[]; roofMats: THREE.Material[]; fade: number; }
+  interface BuildingViz {
+    rect: [number, number, number, number];
+    mats: THREE.Material[];
+    roofMats: THREE.Material[];
+    meshes: THREE.Object3D[];
+    fade: number;
+    hovered: boolean;
+  }
   const buildings: BuildingViz[] = (ACTIVE_MAP.buildings ?? []).map((b) => ({
     rect: [b.x - 300, b.y - 300, b.x + b.w + 300, b.y + b.h + 300],
-    mats: [], roofMats: [], fade: 1,
+    mats: [], roofMats: [], meshes: [], fade: 1, hovered: false,
   }));
+  const buildingMeshes: THREE.Object3D[] = []; // raycast targets for hover reveal
   function buildingAt(xMm: number, yMm: number): BuildingViz | null {
     for (const b of buildings) {
       if (xMm > b.rect[0] && xMm < b.rect[2] && yMm > b.rect[1] && yMm < b.rect[3]) return b;
@@ -159,6 +167,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       lintel.position.set(cx, 2.45, cz);
       lintel.castShadow = true;
       scene.add(sill, lintel);
+      if (bviz) {
+        sill.userData.bviz = bviz; lintel.userData.bviz = bviz;
+        bviz.meshes.push(sill, lintel);
+        buildingMeshes.push(sill, lintel);
+      }
       continue;
     }
     if (o.kind === "truck" || o.kind === "car") {
@@ -207,6 +220,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     m.castShadow = true;
     m.receiveShadow = true;
     scene.add(m);
+    if (bviz) {
+      m.userData.bviz = bviz;
+      bviz.meshes.push(m);
+      buildingMeshes.push(m);
+    }
   }
   // roof slabs (fade out when anyone you can see is inside)
   for (const b of ACTIVE_MAP.buildings ?? []) {
@@ -216,7 +234,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     roof.position.set(b.x / 1000 + b.w / 2000, 3.12, b.y / 1000 + b.h / 2000);
     roof.castShadow = true;
     scene.add(roof);
-    viz?.roofMats.push(mat);
+    if (viz) {
+      viz.roofMats.push(mat);
+      roof.userData.bviz = viz;
+      viz.meshes.push(roof);
+      buildingMeshes.push(roof);
+    }
   }
 
   // --- victory-point zones: ground ring + flag ---------------------------------
@@ -669,6 +692,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     const hostile = id !== null && !mySet.has(id) && hsnap?.alive && !hsnap.down;
     canvas.style.cursor = forcedCursor ?? (hostile ? "crosshair" : "default");
     hoverCb?.(hostile ? id : null, e.clientX, e.clientY);
+    // hover a building: reveal it (roof + walls go transparent)
+    raycaster.setFromCamera(ndcFrom(e), camera);
+    const bHit = raycaster.intersectObjects(buildingMeshes, false)[0];
+    const hoveredViz = (bHit?.object.userData.bviz as BuildingViz | undefined) ?? null;
+    for (const b of buildings) b.hovered = b === hoveredViz;
   });
   const endRotate = (e: PointerEvent): void => {
     if (e.button === 1) rotating = false;
@@ -773,10 +801,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     for (const v of zoneViz) {
       v.ring.opacity = v.contested || v.capping >= 0 ? pulse : 0.28;
     }
-    // building cutaway fade
+    // building cutaway fade (occupied by someone you can see, or hovered)
     for (const b of buildings) {
-      const wallTarget = b.fade === 1 ? 0.35 : 1;
-      const roofTarget = b.fade === 1 ? 0.1 : 1;
+      const open2 = b.fade === 1 || b.hovered;
+      const wallTarget = open2 ? 0.35 : 1;
+      const roofTarget = open2 ? 0.1 : 1;
       for (const m of b.mats) {
         const mm = m as THREE.MeshStandardMaterial;
         mm.opacity += (wallTarget - mm.opacity) * Math.min(1, dt * 8);
