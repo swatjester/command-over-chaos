@@ -411,6 +411,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     s.cooldown = WEAPONS[s.weapon].cooldown;
     resolved.push({ shooter: s, target, hit: roll < shot.pct });
   }
+  const killedThisTick = new Set<number>();
   for (const { shooter, target, hit } of resolved) {
     const w = WEAPONS[shooter.weapon];
     let kill = false;
@@ -419,8 +420,7 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       if (target.hp <= 0) {
         woundOut(target); // downs, or kills outright if already revived once
         kill = true;
-        // veterancy: surviving fights makes you steadier (CoC rank pips)
-        shooter.pips = Math.min(3, shooter.pips + 1);
+        killedThisTick.add(target.id);
       }
     }
     if (target.alive && !target.down) {
@@ -439,6 +439,14 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
       ix += ox; iy += oy;
     }
     shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x + shooter.leanX, sy: shooter.y + shooter.leanY, tx: ix, ty: iy });
+  }
+  // veterancy: every shooter whose hit landed on a victim downed THIS tick
+  // shares the credit — id-order must never decide who gets the pip
+  // (combat is simultaneous; kill credit is too)
+  for (const { shooter, target, hit } of resolved) {
+    if (hit && killedThisTick.has(target.id)) {
+      shooter.pips = Math.min(3, shooter.pips + 1);
+    }
   }
 
   // 6. suppression decay — 15/s (was 30/s): sustained aimed fire from a

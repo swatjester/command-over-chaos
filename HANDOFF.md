@@ -76,6 +76,7 @@ M0 ✓, M1 ✓, M2 core ✓, **M2.1 ✓ except 1v1-over-internet verification** 
 - Lobby has no chat and no kick; name changes are lobby-phase only. Fine for playtests.
 - Bots don't throw grenades, don't vault deliberately (A* may route them over cover, which works), and don't retreat; hunter can tunnel-vision across the map. VP scores have no win condition yet. All intentional v1 — tune from playtests.
 - Zone capture radius/time/values are placeholder-tier like all balance data (zones in `map.ts`, CAP_TICKS/DEPLOY_TICKS in `state.ts`).
+- **I-005 (HIGH, pre-ranked blocker): id-slot team skew ~43/57 in the courtyard harness since the fire-on-move gate** — see ISSUES.md for the full forensic trail (baseline fair, PRNG clean, stationary/empty-map fair, arrivals symmetric, first blood 62/38 low-id team). The harness now warns at >3σ. Do NOT chase balance numbers until this is found; it contaminates harness reads.
 - Old replays recorded before the map rework will NOT verify (map geometry changed under the same "farmstead" name). Fine — replays are per-build artifacts until versioned maps land.
 - Roadmap backlog added in PLAN (assets pass, muzzle flash/smoke + surface impact effects, destructible walls, JTAC/artillery fire-support archetypes, UAV overwatch).
 - CI: GitHub Actions runs build+tests on push (pnpm version comes from packageManager field only).
