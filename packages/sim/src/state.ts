@@ -149,7 +149,9 @@ export function spawnSoldier(
   const soldier: Soldier = {
     id: s.soldiers.length,
     team, x, y, tx: null, ty: null,
-    stance: "stand", moveMode: "move",
+    // sprint is the default gait (2026-07-08); "move" (walk) is the toggled
+    // steady pace — a CQB accuracy stance, since modifiers are unchanged
+    stance: "stand", moveMode: "sprint",
     hp: 100, suppression: 0, alive: true,
     weapon, cooldown: 0, targetId: null, aimId: null, settle: 0,
     queue: [], frags, smokes, holdFire: false, leanX: 0, leanY: 0,

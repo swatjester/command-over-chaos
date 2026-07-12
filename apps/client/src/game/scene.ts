@@ -10,6 +10,18 @@ import type {
 } from "@coc/protocol";
 import { ACTIVE_MAP, TICK_RATE, VAULT_TICKS } from "@coc/sim";
 
+/** Low cover (mm boxes) for the hunker-visual check — client-side only. */
+const LOW_COVER = ACTIVE_MAP.obstacles.filter((o) => o.ht <= 1200);
+function nearLowCover(xMm: number, yMm: number): boolean {
+  for (const o of LOW_COVER) {
+    if (
+      xMm > o.x - 950 && xMm < o.x + o.w + 950 &&
+      yMm > o.y - 950 && yMm < o.y + o.h + 950
+    ) return true;
+  }
+  return false;
+}
+
 const CAM_PITCH = Math.atan(1 / Math.SQRT2); // classic 2:1 iso pitch
 
 export interface EffectsData {
@@ -396,7 +408,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       } else {
         g.userData.target = new THREE.Vector3(s.x / 1000, 0, s.y / 1000);
       }
-      (g.userData.lean as THREE.Vector3).set(s.leanX / 1000, 0, s.leanY / 1000);
+      (g.userData.lean as THREE.Vector3).set((s.leanX * 1.2) / 1000, 0, (s.leanY * 1.2) / 1000);
       const ring = g.getObjectByName("selection") as THREE.Mesh;
       (ring.material as THREE.MeshBasicMaterial).opacity = selSet.has(s.id) && s.alive ? 0.9 : 0;
       if (!s.alive && !g.userData.dead) {
@@ -408,9 +420,26 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
       } else if (s.alive && s.down) {
         g.scale.y = 0.28; // downed: flat but not gone — revivable
       } else if (s.alive) {
-        const base = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
-        // peeking over cover: rise toward crouch height while aiming
-        g.scale.y = s.peekUp && base < 0.72 ? 0.72 : base;
+        // readable cover language: HUNKER low when idle behind cover, POP UP
+        // and lean when working over/around it
+        const idle = s.aimId === null && s.tx === null;
+        const hunkered = idle && s.stance !== "prone" && nearLowCover(s.x, s.y);
+        let h = s.stance === "prone" ? 0.45 : s.stance === "crouch" ? 0.72 : 1;
+        if (s.peekUp) h = Math.max(h, 0.88);            // rising over the cover to aim
+        else if (hunkered) h = Math.min(h, 0.58);        // tucked in tight
+        g.scale.y = h;
+        // body tilt sells the peek: lean-out tips sideways, peek-over tips forward
+        const fig = g.getObjectByName("figure");
+        if (fig) {
+          const leanMag = Math.sqrt(s.leanX * s.leanX + s.leanY * s.leanY);
+          if (leanMag > 0) {
+            (fig as THREE.Group).rotation.set(0.22 * (s.leanY / leanMag), 0, -0.22 * (s.leanX / leanMag));
+          } else if (s.peekUp) {
+            (fig as THREE.Group).rotation.set(0.14, 0, 0);
+          } else {
+            (fig as THREE.Group).rotation.set(0, 0, 0);
+          }
+        }
       }
       // waypoint path for selected own soldiers
       if (selSet.has(s.id) && mySet.has(s.id) && s.alive && s.tx !== null && s.ty !== null) {

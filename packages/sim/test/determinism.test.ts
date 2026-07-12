@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blocked, botThink, CAP_TICKS, computeShotPct, createBotMemory, createState,
-  dist, FARMSTEAD_MAP, findCoverSpot, GREYBOX_MAP, hashState, losBetween, losBetweenEx, MM,
+  dist, FARMSTEAD_MAP, findCoverSpot, findHugSpot, GREYBOX_MAP, hashState, losBetween, losBetweenEx, MM,
   rngInt, spawnSoldier, tick, VAULT_TICKS, WEAPONS,
   type MapDef, type Order, type OrderLog,
 } from "../src/index.js";
@@ -779,6 +779,8 @@ describe("veterancy pips (M3 slice)", () => {
     const a = spawnSoldier(state, 0, 10 * MM, 10 * MM);
     const b = spawnSoldier(state, 1, 12 * MM, 10 * MM);
     b.hp = 1; // one hit downs
+    b.holdFire = true; // the test is about the pip, not the duel — with the
+    // -33% accuracy pass, fixed-seed rolls sometimes let b down a first
     const before = computeShotPct(state.obstacles, a, b, []).pct;
     for (let t = 0; t < 600 && a.pips === 0; t++) tick(state, []);
     expect(a.pips).toBe(1);
@@ -1074,5 +1076,51 @@ describe("cover-snap move assist", () => {
     const second = findCoverSpot(wall, 52 * MM, 47 * MM, 6000, [first])!;
     expect(second).not.toBeNull();
     expect(dist(first[0], first[1], second[0], second[1])).toBeGreaterThanOrEqual(900);
+  });
+});
+
+
+describe("cover hug (click within a square of cover)", () => {
+  // east-west low wall from (40,50) to (60,50.4)
+  const wall = [{ x: 40 * MM, y: 50 * MM, w: 20 * MM, h: 400, ht: 1100, kind: "stone" as const }];
+
+  it("approaching from the south takes the south face; from the north, the north face", () => {
+    const south = findHugSpot(wall, 50 * MM, 50 * MM, 50 * MM, 70 * MM)!;
+    expect(south[1]).toBe(50 * MM + 400 + 600); // south face + HUG_OFF
+    const north = findHugSpot(wall, 50 * MM, 50 * MM, 50 * MM, 30 * MM)!;
+    expect(north[1]).toBe(50 * MM - 600); // north face
+    expect(blocked(wall, ...south)).toBe(false);
+    expect(blocked(wall, ...north)).toBe(false);
+  });
+
+  it("a window is held from the side you're on (inside stays inside)", () => {
+    const win = [{ x: 148 * MM, y: 63800, w: 3 * MM, h: 400, ht: 1100, kind: "window" as const }];
+    // "inside the building" = south of this north-wall window
+    const inside = findHugSpot(win, 149 * MM, 64 * MM, 150 * MM, 70 * MM)!;
+    expect(inside[1]).toBeGreaterThan(64200); // south side of the frame
+    const outside = findHugSpot(win, 149 * MM, 64 * MM, 150 * MM, 58 * MM)!;
+    expect(outside[1]).toBeLessThan(63800); // north side
+  });
+
+  it("clicks farther than a square from cover do not hug", () => {
+    expect(findHugSpot(wall, 50 * MM, 45 * MM, 50 * MM, 70 * MM)).toBeNull(); // 4.6m short of the wall
+    expect(findHugSpot(wall, 50 * MM, 50.9 * MM, 50 * MM, 70 * MM)).not.toBeNull(); // 0.5m off: hug
+  });
+
+  it("a squad spreads along the face instead of stacking", () => {
+    const taken: Array<[number, number]> = [];
+    const spots: Array<[number, number]> = [];
+    for (let i = 0; i < 4; i++) {
+      const spot = findHugSpot(wall, 50 * MM, 51 * MM, 50 * MM, 70 * MM, taken)!;
+      expect(spot).not.toBeNull();
+      taken.push(spot);
+      spots.push(spot);
+    }
+    for (let i = 0; i < spots.length; i++) {
+      for (let j = i + 1; j < spots.length; j++) {
+        expect(dist(spots[i]![0], spots[i]![1], spots[j]![0], spots[j]![1])).toBeGreaterThanOrEqual(900);
+      }
+      expect(spots[i]![1]).toBe(50 * MM + 400 + 600); // all on the south face
+    }
   });
 });

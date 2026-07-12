@@ -91,6 +91,67 @@ export function findCoverSpot(
   return best;
 }
 
+/** How close (mm) a click must land to cover to read as "hug that cover". */
+export const HUG_CLICK_RANGE = 1000;
+/** Hugging distance from the cover face (mm) — inside corner-peek range. */
+export const HUG_OFF = 600;
+
+/**
+ * Click-near-cover movement assist: clicking within HUG_CLICK_RANGE of an
+ * obstacle (or on it) means "take cover THERE". Returns a spot tight
+ * against the face on the soldier's side of the obstacle — approach from
+ * the south and you stack on the south face; click a window from inside
+ * the building and you hold the inside of the frame. If the smart side is
+ * blocked, the opposite face is tried. `taken` positions push the spot
+ * along the face so a squad spreads out along the wall.
+ */
+export function findHugSpot(
+  obstacles: readonly Obstacle[], clickX: number, clickY: number,
+  fromX: number, fromY: number,
+  taken: ReadonlyArray<[number, number]> = [],
+): [number, number] | null {
+  // nearest obstacle whose (unexpanded) box is within HUG_CLICK_RANGE of the click
+  let target: Obstacle | null = null;
+  let bestD = HUG_CLICK_RANGE + 1;
+  for (const o of obstacles) {
+    const dx = clickX < o.x ? o.x - clickX : clickX > o.x + o.w ? clickX - (o.x + o.w) : 0;
+    const dy = clickY < o.y ? o.y - clickY : clickY > o.y + o.h ? clickY - (o.y + o.h) : 0;
+    const d = Math.floor(Math.sqrt(dx * dx + dy * dy));
+    if (d < bestD) { bestD = d; target = o; }
+  }
+  if (!target) return null;
+  const o = target;
+
+  // hug the broad face (thin axis) on the soldier's side; clamp along the face
+  const alongX = o.w >= o.h; // wall runs east-west -> hug north or south face
+  const tryFaces: Array<[number, number]> = [];
+  if (alongX) {
+    const px = Math.min(Math.max(clickX, o.x), o.x + o.w);
+    const near = fromY <= o.y + o.h / 2 ? o.y - HUG_OFF : o.y + o.h + HUG_OFF;
+    const far = fromY <= o.y + o.h / 2 ? o.y + o.h + HUG_OFF : o.y - HUG_OFF;
+    tryFaces.push([px, near], [px, far]);
+  } else {
+    const py = Math.min(Math.max(clickY, o.y), o.y + o.h);
+    const near = fromX <= o.x + o.w / 2 ? o.x - HUG_OFF : o.x + o.w + HUG_OFF;
+    const far = fromX <= o.x + o.w / 2 ? o.x + o.w + HUG_OFF : o.x - HUG_OFF;
+    tryFaces.push([near, py], [far, py]);
+  }
+  for (const [bx, by] of tryFaces) {
+    // slide along the face to dodge blocked ground and taken spots
+    for (const slide of [0, 900, -900, 1800, -1800, 2700, -2700]) {
+      const px = alongX ? Math.min(Math.max(bx + slide, o.x), o.x + o.w) : bx;
+      const py = alongX ? by : Math.min(Math.max(by + slide, o.y), o.y + o.h);
+      if (blocked(obstacles, px, py)) continue;
+      let clash = false;
+      for (const [tx2, ty2] of taken) {
+        if (dist(px, py, tx2, ty2) < 900) { clash = true; break; }
+      }
+      if (!clash) return [px, py];
+    }
+  }
+  return null;
+}
+
 /** Thin, low cover a standing/crouching soldier can climb over: low walls,
  *  fences, window sills. Bulky low cover (hay bales, tree trunks) cannot be
  *  vaulted. 1200 = WALL_HEIGHT (kept literal: los.ts imports this module). */

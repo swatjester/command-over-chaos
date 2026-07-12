@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
-import { ACTIVE_MAP, computeShotPct, DELIVERY, dist, findCoverSpot, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
+import { ACTIVE_MAP, computeShotPct, DELIVERY, dist, findCoverSpot, findHugSpot, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
 import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
 import type { BotPersonality } from "@coc/sim";
 import {
@@ -150,16 +150,29 @@ export function App(): JSX.Element {
       const taken: Array<[number, number]> = (snapRef.current?.soldiers ?? [])
         .filter((s) => s.alive && !selectedRef.current.includes(s.id))
         .map((s) => [s.x, s.y]);
-      conn.sendOrders(sel.map((s) => {
+      const orders = sel.flatMap((s) => {
         let dx = x + (sel.length > 1 ? s.x - cx : 0);
         let dy = y + (sel.length > 1 ? s.y - cy : 0);
-        if (sel.length > 1) {
+        // clicked within a square of cover: HUG it — tight against the face
+        // on this soldier's side (near/far, inside/outside), squad spreading
+        // along the wall — and duck into a crouch on the way in
+        const hug = findHugSpot(ACTIVE_MAP.obstacles, x, y, s.x, s.y, taken);
+        let hugging = false;
+        if (hug) {
+          [dx, dy] = hug;
+          hugging = true;
+        } else if (sel.length > 1) {
           const spot = findCoverSpot(ACTIVE_MAP.obstacles, dx, dy, 6000, taken);
           if (spot) { dx = spot[0]; dy = spot[1]; }
         }
         taken.push([dx, dy]);
-        return { type: "move" as const, soldierId: s.id, x: dx, y: dy, queue: shift || undefined };
-      }));
+        const out: Parameters<typeof conn.sendOrders>[0] = [
+          { type: "move" as const, soldierId: s.id, x: dx, y: dy, queue: shift || undefined },
+        ];
+        if (hugging && s.stance === "stand") out.push({ type: "stance" as const, soldierId: s.id, stance: "crouch" as const });
+        return out;
+      });
+      conn.sendOrders(orders);
     });
     scene.onGroundLeftClick((x, y) => {
       const kind = armedRef.current;
@@ -226,9 +239,9 @@ export function App(): JSX.Element {
       }
       const sel = aliveSelected();
       if (sel.length === 0) return;
-      if (key === "f") { // sprint toggle
-        const allSprint = sel.every((s) => s.moveMode === "sprint");
-        conn.sendOrders(sel.map((s) => ({ type: "mode" as const, soldierId: s.id, mode: allSprint ? "move" as const : "sprint" as const })));
+      if (key === "f") { // walk toggle (sprint is the default gait)
+        const allWalking = sel.every((s) => s.moveMode === "move");
+        conn.sendOrders(sel.map((s) => ({ type: "mode" as const, soldierId: s.id, mode: allWalking ? "sprint" as const : "move" as const })));
         return;
       }
       if (key === "t") { // hold fire <-> fire at will
@@ -533,7 +546,7 @@ export function App(): JSX.Element {
         fontFamily: "system-ui, sans-serif", lineHeight: 1.7,
       }}>
         left-click: select · drag: box select · right-click: move / fire / revive ally · shift+right-click: queue<br />
-        `: select squad · 1–4: soldier · shift+1–4: reassign hotkey · F: sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
+        `: select squad · 1–4: soldier · shift+1–4: reassign hotkey · F: walk/sprint · T: hold fire · Q/E: frag/smoke · Z/X/C: stance · H: halt<br />
         WASD: pan · wheel: zoom · middle-drag: rotate
       </div>
     </div>
@@ -779,7 +792,7 @@ function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onRe
 const BOOTCAMP_STEPS = [
   { title: "MOVE OUT", body: "Right-click the ground to move. Drag a box or press ` to grab the whole fireteam, then move them up the road." },
   { title: "STANCES", body: "Z stand · X crouch · C prone. Prone is slow but hard to hit — and invisible behind low cover. Put someone prone." },
-  { title: "SPRINT", body: "F toggles sprint: fast, loud, and terrible for your aim. Sprint a soldier forward." },
+  { title: "WALK", body: "Soldiers sprint by default — fast but terrible for your aim. F toggles a steady walk: slower, much more accurate. Walk someone forward (your CQB stance)." },
   { title: "VAULT", body: "Thin low walls can be climbed: order a move across the courtyard wall and your soldier vaults it (1s, exposed — pick your moment)." },
   { title: "CONTACT", body: "An enemy stands near the well. Hover him: shot % changes with range, stance, cover. Right-click to engage and take him out." },
   { title: "FRAG OUT", body: "A second enemy is crouched behind the north wall. Q arms a frag — click to throw it over the wall (watch the deviation)." },
@@ -808,7 +821,7 @@ function Bootcamp({ snap, myIds }: { snap: SnapshotData | null; myIds: number[] 
         return p && dist(s.x, s.y, p[0], p[1]) > 5000;
       })
       : step === 1 ? mine.some((s) => s.stance === "prone")
-      : step === 2 ? mine.some((s) => s.moveMode === "sprint" && s.tx !== null)
+      : step === 2 ? mine.some((s) => s.moveMode === "move" && s.tx !== null)
       : step === 3 ? mine.some((s) => s.vaultT > 0)
       : step === 4 ? (enemy(4) ? !enemy(4)!.alive || enemy(4)!.down : true)
       : step === 5 ? sawFrag.current
