@@ -22,8 +22,8 @@ const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const RECONNECT_GRACE_MS = 120_000;
 const COUNTDOWN_S = 3;
 
-const seed = Date.now() >>> 0;
-const state = createState(seed, ACTIVE_MAP);
+let seed = Date.now() >>> 0;
+let state = createState(seed, ACTIVE_MAP);
 const pendingOrders: Order[] = [];
 let pendingShots: ShotEvent[] = [];
 let pendingBooms: Boom[] = [];
@@ -35,15 +35,18 @@ interface ReplayEvent {
   spawns?: Array<{ team: 0 | 1; x: number; y: number; weapon: WeaponId; frags: number; smokes: number }>;
   reaps?: number[];
 }
-const replay = {
-  version: 1,
-  seed,
-  map: "farmstead",
-  deploy: DEPLOY_TICKS, // verify.mjs must arm the same countdown
-  startedAt: new Date().toISOString(),
-  events: [] as ReplayEvent[],
-};
-const replayFile = `replays/match-${Date.now()}.json`;
+function newReplay() {
+  return {
+    version: 1,
+    seed,
+    map: "farmstead",
+    deploy: DEPLOY_TICKS, // verify.mjs must arm the same countdown
+    startedAt: new Date().toISOString(),
+    events: [] as ReplayEvent[],
+  };
+}
+let replay = newReplay();
+let replayFile = `replays/match-${Date.now()}.json`;
 try { mkdirSync("replays", { recursive: true }); } catch { /* ok */ }
 function saveReplay(): void {
   try { writeFileSync(replayFile, JSON.stringify(replay)); } catch (e) { console.error("[coc] replay save failed", e); }
@@ -96,6 +99,11 @@ wss.on("connection", (ws) => {
       }
     } else if (msg.t === "lobby") {
       if (!player) return;
+      // end the round: save the replay, reset the world, back to the lobby
+      if (msg.endMatch && phase === "live") {
+        endMatch(`by ${player.id}`);
+        return;
+      }
       // bot management works in any phase (live adds spawn straight in)
       if (msg.addBot) addBot(msg.addBot.team, msg.addBot.personality, msg.addBot.archetype);
       if (msg.removeBot && phase !== "live") {
@@ -259,6 +267,35 @@ function startMatch(): void {
   }
   lobbyBroadcast();
   console.log(`[coc] match live: ${players.size} players`);
+}
+
+/** Save the replay, rebuild the world, and drop everyone back into the lobby. */
+function endMatch(why: string): void {
+  saveReplay();
+  console.log(`[coc] match ended ${why} — replay saved to ${replayFile}, back to lobby`);
+  seed = Date.now() >>> 0;
+  state = createState(seed, ACTIVE_MAP);
+  pendingOrders.length = 0;
+  pendingShots = [];
+  pendingBooms = [];
+  nextAnchor[0] = 0;
+  nextAnchor[1] = 0;
+  replay = newReplay();
+  replayFile = `replays/match-${Date.now()}.json`;
+  phase = "lobby";
+  countdown = 0;
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  for (const p of players.values()) {
+    p.soldierIds = [];
+    p.ready = p.bot; // bots stay ready; humans re-ready
+    if (p.bot) p.botMem = createBotMemory();
+    // humans who closed their tab mid-match have nothing to reclaim now
+    if (!p.bot && !p.ws) {
+      if (p.reapTimer) clearTimeout(p.reapTimer);
+      players.delete(p.token);
+    }
+  }
+  lobbyBroadcast();
 }
 
 function reap(player: Player): void {

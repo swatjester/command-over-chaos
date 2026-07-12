@@ -975,3 +975,78 @@ describe("deploy phase", () => {
     expect(DEPLOY_TICKS).toBe(450);
   });
 });
+
+
+describe("fire on the move (2026-07-08)", () => {
+  const base = (weapon: "dmr" | "carbine" | "lmg" | "smg") => {
+    const s = createState(11);
+    const shooter = spawnSoldier(s, 0, 10 * MM, 10 * MM, weapon);
+    const target = spawnSoldier(s, 1, 10 * MM, 30 * MM, "carbine");
+    target.holdFire = true;
+    return { s, shooter, target };
+  };
+
+  it("a moving DMR/LMG cannot fire; stationary it can", () => {
+    for (const w of ["dmr", "lmg"] as const) {
+      const { s, shooter, target } = base(w);
+      shooter.tx = 10 * MM; shooter.ty = 50 * MM; // moving
+      shooter.settle = 240;
+      const while_moving = computeShotPct(s.obstacles, shooter, target, []);
+      expect(while_moving.moving).toBe(true);
+      expect(while_moving.pct).toBe(0);
+      shooter.tx = null; shooter.ty = null;
+      expect(computeShotPct(s.obstacles, shooter, target, []).pct).toBeGreaterThan(0);
+    }
+  });
+
+  it("a moving carbine/SMG can fire, at a stiff penalty", () => {
+    for (const w of ["carbine", "smg"] as const) {
+      const { s, shooter, target } = base(w);
+      shooter.settle = 240;
+      const still = computeShotPct(s.obstacles, shooter, target, []).pct;
+      shooter.tx = 10 * MM; shooter.ty = 50 * MM;
+      shooter.moveMode = "sprint";
+      const sprinting = computeShotPct(s.obstacles, shooter, target, []);
+      expect(sprinting.moving).toBe(false);
+      expect(sprinting.pct).toBeGreaterThan(0);
+      expect(sprinting.pct).toBeLessThanOrEqual(Math.ceil(still * 0.25)); // x0.20 sprint factor
+    }
+  });
+
+  it("in the sim, a moving LMG holds fire until it stops", () => {
+    const s = createState(12);
+    const gunner = spawnSoldier(s, 0, 10 * MM, 10 * MM, "lmg");
+    const target = spawnSoldier(s, 1, 10 * MM, 28 * MM, "carbine");
+    target.holdFire = true;
+    target.hp = 100000; // stay up: the LMG kills it mid-test otherwise
+    let shotsWhileMoving = 0;
+    tick(s, [{ type: "move", soldierId: 0, x: 10 * MM, y: 20 * MM, mode: "move" }]);
+    for (let t = 0; t < 400; t++) {
+      const ev = tick(s, []);
+      // combat resolves after movement within a tick: "moving" means still
+      // moving when the shot was rolled
+      if (gunner.tx !== null) shotsWhileMoving += ev.shots.filter((x) => x.shooter === 0).length;
+    }
+    expect(shotsWhileMoving).toBe(0);
+    // after arriving it opens up
+    let shotsAfter = 0;
+    for (let t = 0; t < 200; t++) shotsAfter += tick(s, []).shots.filter((x) => x.shooter === 0).length;
+    expect(shotsAfter).toBeGreaterThan(0);
+  });
+
+  it("sustained lone-DMR fire can pin (suppression outpaces slower decay)", () => {
+    const s = createState(13);
+    const dmr = spawnSoldier(s, 0, 10 * MM, 10 * MM, "dmr");
+    dmr.settle = 240;
+    const victim = spawnSoldier(s, 1, 10 * MM, 40 * MM, "carbine");
+    victim.holdFire = true;
+    victim.hp = 10000; // survive the demonstration
+    let peak = 0;
+    for (let t = 0; t < 900; t++) {
+      tick(s, []);
+      if (victim.suppression > peak) peak = victim.suppression;
+      if (!victim.alive || victim.down) break;
+    }
+    expect(peak).toBeGreaterThan(70); // pinned at least once within 30s
+  });
+});

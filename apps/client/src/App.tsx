@@ -51,7 +51,17 @@ export function App(): JSX.Element {
       if (!alive) { conn?.close(); return; }
       if (!conn) { setPhase("menu"); return; }
       connRef.current = conn;
-      conn.onLobby(setLobby);
+      conn.onLobby((l) => {
+        setLobby(l);
+        // a live match was ended: server dropped everyone back to the lobby
+        if (l.phase === "lobby") {
+          setSnap(null);
+          setMyIds([]);
+          setSelected([]);
+          setArmed(null);
+          setPhase((ph) => (ph === "game" ? "lobby" : ph));
+        }
+      });
       conn.onStart((ids) => {
         setMyIds([...ids]);
         setSelected(ids.slice(0, 1));
@@ -69,6 +79,17 @@ export function App(): JSX.Element {
     return () => { alive = false; connRef.current?.close(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function leaveOffline(): void {
+    connRef.current?.close();
+    connRef.current = null;
+    setScenario(null);
+    setSnap(null);
+    setMyIds([]);
+    setSelected([]);
+    setArmed(null);
+    setPhase("menu");
+  }
 
   function enterOffline(s: OfflineScenario): void {
     const conn = createOffline(archetype, s);
@@ -317,6 +338,33 @@ export function App(): JSX.Element {
           }}>
             {mode === "online" ? "ONLINE" : scenario === "bootcamp" ? "BOOTCAMP" : "OFFLINE SIM"}
           </div>
+          {mode === "online" ? (
+            <button
+              onClick={() => {
+                if (window.confirm("End the round for everyone and return to the lobby?")) {
+                  connRef.current?.sendLobby({ endMatch: true });
+                }
+              }}
+              style={{
+                pointerEvents: "auto", fontSize: 12, padding: "2px 10px", borderRadius: 4,
+                background: "#3a1d12", color: "#e6935a", border: "1px solid #5a2d1a",
+                cursor: "pointer", fontWeight: 700,
+              }}
+            >
+              END ROUND
+            </button>
+          ) : (
+            <button
+              onClick={leaveOffline}
+              style={{
+                pointerEvents: "auto", fontSize: 12, padding: "2px 10px", borderRadius: 4,
+                background: "#1d2a3a", color: "#7db8e6", border: "1px solid #2a3a4a",
+                cursor: "pointer", fontWeight: 700,
+              }}
+            >
+              MENU
+            </button>
+          )}
         </div>
       </div>
 
@@ -351,8 +399,8 @@ export function App(): JSX.Element {
         }}>
           {shooters.map((sh) => {
             const shot = computeShotPct(ACTIVE_MAP.obstacles, sh, hoverTarget, snap?.smokes ?? []);
-            const label = !shot.visible ? "NO LOS" : !shot.inRange ? "RANGE" : shot.settling ? "SETTLING…" : shot.vaulting ? "VAULTING" : `${shot.pct}%`;
-            const color = !shot.visible || !shot.inRange ? "#8b98a5" : shot.settling || shot.vaulting ? "#e6b45a"
+            const label = !shot.visible ? "NO LOS" : !shot.inRange ? "RANGE" : shot.settling ? "SETTLING…" : shot.vaulting ? "VAULTING" : shot.moving ? "MOVING" : `${shot.pct}%`;
+            const color = !shot.visible || !shot.inRange ? "#8b98a5" : shot.settling || shot.vaulting || shot.moving ? "#e6b45a"
               : shot.pct >= 60 ? "#5fd68a" : shot.pct >= 30 ? "#e6b45a" : "#e66a5a";
             return (
               <div key={sh.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, lineHeight: 1.8 }}>
@@ -363,7 +411,7 @@ export function App(): JSX.Element {
           })}
           {shooters.length === 1 && (() => {
             const shot = computeShotPct(ACTIVE_MAP.obstacles, shooters[0]!, hoverTarget, snap?.smokes ?? []);
-            if (!shot.visible || !shot.inRange || shot.settling || shot.vaulting) return null;
+            if (!shot.visible || !shot.inRange || shot.settling || shot.vaulting || shot.moving) return null;
             return (
               <div style={{ fontSize: 10, opacity: 0.75, marginTop: 4, lineHeight: 1.6 }}>
                 <div>base ({WEAPONS[shooters[0]!.weapon].name.toLowerCase()} @ range): {shot.base}%</div>
@@ -724,6 +772,8 @@ function AimLine({ s, byId, smokes }: {
         <span style={{ opacity: 0.55 }}>aim </span>
         {shot.settling
           ? <span style={{ color: "#e6b45a", fontWeight: 700 }}>settling…</span>
+          : shot.moving
+          ? <span style={{ color: "#e6b45a", fontWeight: 700 }} title="this weapon can't fire on the move">moving</span>
           : <span style={{ color, fontWeight: 800 }}>{shot.pct}%</span>}
         <span style={{ opacity: 0.55 }}> → {WEAPONS[target.weapon].name} #{target.id}</span>
       </div>

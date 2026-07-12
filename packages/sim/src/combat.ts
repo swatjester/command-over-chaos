@@ -53,10 +53,12 @@ export interface ShotPct {
   settling: boolean;
   /** true when the only blocker is the shooter being mid-vault */
   vaulting: boolean;
+  /** true when the only blocker is moving with a weapon that can't fire on the move */
+  moving: boolean;
   factors: ShotFactor[];
 }
 
-const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settling: false, vaulting: false, factors: [] };
+const NO_SHOT: Omit<ShotPct, "visible" | "inRange"> = { pct: 0, base: 0, settling: false, vaulting: false, moving: false, factors: [] };
 
 export function computeShotPct(
   obstacles: readonly Obstacle[], shooter: Combatant, target: Combatant,
@@ -74,12 +76,18 @@ export function computeShotPct(
 
   // hands on the wall, not the weapon
   if ((shooter.vaultT ?? 0) > 0) {
-    return { pct: 0, base: 0, visible: true, inRange: true, settling: false, vaulting: true, factors: [] };
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: false, vaulting: true, moving: false, factors: [] };
+  }
+
+  // heavy weapons don't fire on the move — stop to shoot (assault weapons
+  // may, at a stiff penalty below)
+  if (shooter.tx !== null && !w.fireOnMove) {
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: false, vaulting: false, moving: true, factors: [] };
   }
 
   // long-range shots require a settled (stationary) shooter
   if (d > w.settleStart && shooter.settle < w.settleTicks) {
-    return { pct: 0, base: 0, visible: true, inRange: true, settling: true, vaulting: false, factors: [] };
+    return { pct: 0, base: 0, visible: true, inRange: true, settling: true, vaulting: false, moving: false, factors: [] };
   }
 
   // base accuracy: flat to falloffStart, then linear to minAcc at maxRange
@@ -98,7 +106,8 @@ export function computeShotPct(
   apply("shooter stance", shooter.stance === "prone" ? 115 : shooter.stance === "crouch" ? 108 : 100);
   if ((shooter.pips ?? 0) > 0) apply("veteran", 100 + 4 * Math.min(3, shooter.pips!));
   if (shooter.tx !== null) {
-    apply("shooter moving", shooter.moveMode === "sprint" ? 35 : shooter.moveMode === "move" ? 60 : shooter.moveMode === "sneak" ? 75 : 65);
+    // firing on the move is a spray-and-pray act, even for assault weapons
+    apply("shooter moving", shooter.moveMode === "sprint" ? 20 : shooter.moveMode === "move" ? 40 : shooter.moveMode === "sneak" ? 55 : 45);
   }
   if (shooter.suppression > 0) apply("suppressed", 100 - Math.floor(shooter.suppression / 2));
   apply("target profile", tEff.stance === "prone" ? 55 : tEff.stance === "crouch" ? 80 : 100);
@@ -106,5 +115,5 @@ export function computeShotPct(
   if (los.coverMult < 100) apply("target in cover", los.coverMult);
 
   pct = pct < 1 ? 1 : pct > 99 ? 99 : pct;
-  return { pct, base, visible: true, inRange: true, settling: false, vaulting: false, factors };
+  return { pct, base, visible: true, inRange: true, settling: false, vaulting: false, moving: false, factors };
 }

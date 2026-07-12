@@ -44,6 +44,7 @@ export interface LobbyAction {
   start?: boolean;
   addBot?: { team: 0 | 1; personality: BotPersonality; archetype?: PlayableArchetype };
   removeBot?: string;
+  endMatch?: boolean;
 }
 
 export interface Connection {

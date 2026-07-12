@@ -81,6 +81,8 @@ export const ClientMsgSchema = z.discriminatedUnion("t", [
     }).optional(),
     /** remove a bot by its player id (lobby phase only) */
     removeBot: z.string().optional(),
+    /** end the current match: replay saved, everyone returns to the lobby */
+    endMatch: z.boolean().optional(),
   }),
 ]);
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;

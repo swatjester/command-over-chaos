@@ -441,9 +441,12 @@ export function tick(state: SimState, orders: readonly Order[]): TickEvents {
     shots.push({ shooter: shooter.id, target: target.id, hit, kill, sx: shooter.x + shooter.leanX, sy: shooter.y + shooter.leanY, tx: ix, ty: iy });
   }
 
-  // 6. suppression decay
-  for (const s of state.soldiers) {
-    if (s.suppression > 0) s.suppression -= 1;
+  // 6. suppression decay — 15/s (was 30/s): sustained aimed fire from a
+  // single overwatch weapon can now accumulate to a pin
+  if (state.tick % 2 === 0) {
+    for (const s of state.soldiers) {
+      if (s.suppression > 0) s.suppression -= 1;
+    }
   }
 
   // 7. victory-point zones: contest / capture / score
