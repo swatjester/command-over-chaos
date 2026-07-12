@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SoldierSnapshot } from "@coc/protocol";
-import { ACTIVE_MAP, computeShotPct, dist, findCoverSpot, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
+import { ACTIVE_MAP, computeShotPct, DELIVERY, dist, findCoverSpot, WEAPONS, type GrenadeKind, type Stance } from "@coc/sim";
 import { ARCHETYPE_KITS, GAME_NAME, type PlayableArchetype } from "@coc/shared";
 import type { BotPersonality } from "@coc/sim";
 import {
@@ -248,6 +248,23 @@ export function App(): JSX.Element {
   useEffect(() => {
     sceneRef.current?.setCursor(armed ? "cell" : null);
   }, [armed]);
+
+  // grenade range rings while Q/E is armed — one per selected soldier with
+  // that grenade in the pouch (GL reaches 45m, hand toss 15m)
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (!armed || !snap) {
+      scene.setThrowRanges(null);
+      return;
+    }
+    const byId = new Map(snap.soldiers.map((s) => [s.id, s]));
+    const rings = selected
+      .map((id) => byId.get(id))
+      .filter((s): s is SoldierSnapshot => !!s && s.alive && !s.down && (armed === "frag" ? s.frags : s.smokes) > 0)
+      .map((s) => ({ x: s.x, y: s.y, r: DELIVERY[s.weapon === "carbine_gl" ? "gl" : "hand"].range }));
+    scene.setThrowRanges({ kind: armed, rings });
+  }, [armed, selected, snap]);
 
   // --- screens ----------------------------------------------------------------
   if (phase === "boot") {

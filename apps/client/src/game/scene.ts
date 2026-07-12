@@ -24,6 +24,8 @@ export interface SceneApi {
   addShotEvents(shots: ShotEvent[]): void;
   updateEffects(fx: EffectsData): void;
   updateZones(zones: ZoneSnapshot[]): void;
+  /** grenade-armed UI: range rings around throwers (null clears) */
+  setThrowRanges(data: { kind: "frag" | "smoke"; rings: Array<{ x: number; y: number; r: number }> } | null): void;
   onGroundClick(cb: (xMm: number, yMm: number, shift: boolean) => void): void;
   onGroundLeftClick(cb: (xMm: number, yMm: number) => void): void;
   onSoldierClick(cb: (id: number) => void): void;
@@ -560,6 +562,33 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     }
   }
 
+  // --- grenade range rings (Q/E armed) -----------------------------------------
+  const throwGroup = new THREE.Group();
+  scene.add(throwGroup);
+  function setThrowRanges(data: { kind: "frag" | "smoke"; rings: Array<{ x: number; y: number; r: number }> } | null): void {
+    throwGroup.clear();
+    if (!data) return;
+    const color = data.kind === "frag" ? 0xe6935a : 0x7db8e6;
+    for (const rg of data.rings) {
+      const r = rg.r / 1000;
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(r - 0.25, r, 64),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(rg.x / 1000, 0.06, rg.y / 1000);
+      throwGroup.add(ring);
+      // faint fill so the reachable area reads at a glance
+      const fill = new THREE.Mesh(
+        new THREE.CircleGeometry(r, 64),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      fill.rotation.x = -Math.PI / 2;
+      fill.position.set(rg.x / 1000, 0.055, rg.y / 1000);
+      throwGroup.add(fill);
+    }
+  }
+
   // --- picking / hover -----------------------------------------------------------
   const raycaster = new THREE.Raycaster();
   let groundCb: ((x: number, y: number, shift: boolean) => void) | null = null;
@@ -855,6 +884,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
     addShotEvents,
     updateEffects,
     updateZones,
+    setThrowRanges,
     onGroundClick: (cb) => { groundCb = cb; },
     onGroundLeftClick: (cb) => { groundLeftCb = cb; },
     onSoldierClick: (cb) => { soldierCb = cb; },
