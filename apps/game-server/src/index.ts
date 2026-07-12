@@ -15,10 +15,12 @@ import {
   type Boom, type BotMemory, type BotPersonality, type Order, type ShotEvent,
   type Soldier, type WeaponId,
 } from "@coc/sim";
-import { ClientMsgSchema, type ServerMsg } from "@coc/protocol";
+import { ClientMsgSchema, type MatchResult, type ServerMsg } from "@coc/protocol";
 import { ARCHETYPE_KITS, DEFAULT_SERVER_PORT, type PlayableArchetype } from "@coc/shared";
 
 const PORT = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
+/** dev override: COC_DEPLOY=30 shortens the pre-match deploy window (ticks) */
+const DEPLOY = Math.max(1, Number(process.env.COC_DEPLOY ?? DEPLOY_TICKS));
 const RECONNECT_GRACE_MS = 120_000;
 const COUNTDOWN_S = 3;
 
@@ -40,7 +42,7 @@ function newReplay() {
     version: 1,
     seed,
     map: "farmstead",
-    deploy: DEPLOY_TICKS, // verify.mjs must arm the same countdown
+    deploy: DEPLOY, // verify.mjs must arm the same countdown
     startedAt: new Date().toISOString(),
     events: [] as ReplayEvent[],
   };
@@ -56,6 +58,8 @@ setInterval(saveReplay, 30_000);
 // ---- players / sessions / lobby ---------------------------------------------
 type Phase = "lobby" | "starting" | "live";
 let phase: Phase = "lobby";
+const options = { timeLimitMin: 15, vpTarget: 500 };
+let lastResult: MatchResult | null = null;
 let countdown = 0;
 let countdownTimer: NodeJS.Timeout | null = null;
 
@@ -101,8 +105,13 @@ wss.on("connection", (ws) => {
       if (!player) return;
       // end the round: save the replay, reset the world, back to the lobby
       if (msg.endMatch && phase === "live") {
-        endMatch(`by ${player.id}`);
+        const [a, b] = state.vp;
+        endMatch(`by ${player.id}`, { winner: a > b ? 0 : b > a ? 1 : -1, reason: "manual", vp: [a, b] });
         return;
+      }
+      if (msg.options && phase !== "live") {
+        options.timeLimitMin = msg.options.timeLimitMin;
+        options.vpTarget = msg.options.vpTarget;
       }
       // bot management works in any phase (live adds spawn straight in)
       if (msg.addBot) addBot(msg.addBot.team, msg.addBot.personality, msg.addBot.archetype);
@@ -260,7 +269,8 @@ function cancelCountdown(): void {
 
 function startMatch(): void {
   phase = "live";
-  state.deploy = DEPLOY_TICKS; // 15s: give initial orders, nothing moves
+  lastResult = null;
+  state.deploy = DEPLOY; // default 15s: give initial orders, nothing moves
   for (const p of players.values()) spawnSquad(p); // join order = deterministic spawn order
   for (const p of players.values()) {
     if (p.ws) send(p.ws, { t: "start", yourSoldierIds: p.soldierIds });
@@ -270,7 +280,8 @@ function startMatch(): void {
 }
 
 /** Save the replay, rebuild the world, and drop everyone back into the lobby. */
-function endMatch(why: string): void {
+function endMatch(why: string, result: MatchResult | null = null): void {
+  lastResult = result;
   saveReplay();
   console.log(`[coc] match ended ${why} — replay saved to ${replayFile}, back to lobby`);
   seed = Date.now() >>> 0;
@@ -329,6 +340,8 @@ function lobbyBroadcast(): void {
     send(p.ws, {
       t: "lobby", phase, yourId: p.id, players: roster,
       countdown: phase === "starting" ? countdown : undefined,
+      options: { ...options },
+      result: lastResult ?? undefined,
     });
   }
 }
@@ -348,6 +361,8 @@ setInterval(() => {
     const ev = tick(state, orders);
     pendingShots.push(...ev.shots);
     pendingBooms.push(...ev.booms);
+    // win conditions (once deployed, both sides fielded)
+    if (checkVictory()) break;
     // bots think once a second (staggered), queueing orders for the next
     // tick exactly like a player would — replays record them identically
     for (const p of players.values()) {
@@ -359,6 +374,35 @@ setInterval(() => {
   }
 }, 4);
 
+/** Wipe / VP-target / round-clock win checks. Returns true when the round ended. */
+function checkVictory(): boolean {
+  if (phase !== "live" || state.deploy > 0) return false;
+  const [a, b] = state.vp;
+  const spawned: [number, number] = [0, 0];
+  const up: [number, number] = [0, 0];
+  for (const s of state.soldiers) {
+    spawned[s.team] += 1;
+    if (s.alive && !s.down) up[s.team] += 1;
+  }
+  if (spawned[0] > 0 && spawned[1] > 0) {
+    if (up[0] === 0 || up[1] === 0) {
+      const winner = up[0] === 0 && up[1] === 0 ? -1 : up[0] === 0 ? 1 : 0;
+      endMatch("— side wiped", { winner, reason: "wipe", vp: [a, b] });
+      return true;
+    }
+  }
+  if (options.vpTarget > 0 && (a >= options.vpTarget || b >= options.vpTarget)) {
+    const winner = a >= options.vpTarget && b >= options.vpTarget ? (a > b ? 0 : b > a ? 1 : -1) : a >= options.vpTarget ? 0 : 1;
+    endMatch("— VP target reached", { winner, reason: "vp", vp: [a, b] });
+    return true;
+  }
+  if (options.timeLimitMin > 0 && state.tick - DEPLOY >= options.timeLimitMin * 1800) {
+    endMatch("— time expired", { winner: a > b ? 0 : b > a ? 1 : -1, reason: "time", vp: [a, b] });
+    return true;
+  }
+  return false;
+}
+
 /** Fog rule: own team always; enemy soldiers only while some living ally sees them. */
 function visibleTo(team: 0 | 1): Soldier[] {
   return state.soldiers.filter((s) => {
@@ -367,6 +411,11 @@ function visibleTo(team: 0 | 1): Soldier[] {
       (a) => a.team === team && a.alive && losBetween(state.obstacles, a, s, state.smokes).visible,
     );
   });
+}
+
+function timeLeft(): number {
+  if (options.timeLimitMin <= 0) return -1;
+  return Math.max(0, options.timeLimitMin * 1800 - Math.max(0, state.tick - DEPLOY));
 }
 
 function broadcast(): void {
@@ -378,8 +427,8 @@ function broadcast(): void {
   const grenades = state.grenades;
   const smokes = state.smokes;
   const byTeam: Record<0 | 1, string> = {
-    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy } satisfies ServerMsg),
-    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy } satisfies ServerMsg),
+    0: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(0), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy, timeLeft: timeLeft(), vpTarget: options.vpTarget } satisfies ServerMsg),
+    1: JSON.stringify({ t: "snapshot", tick: state.tick, hash, soldiers: visibleTo(1), shots, booms, grenades, smokes, zones: state.zones, vp: state.vp, deploy: state.deploy, timeLeft: timeLeft(), vpTarget: options.vpTarget } satisfies ServerMsg),
   };
   for (const p of players.values()) {
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(byTeam[p.team]);

@@ -26,6 +26,8 @@ export interface SceneApi {
   updateZones(zones: ZoneSnapshot[]): void;
   /** grenade-armed UI: range rings around throwers (null clears) */
   setThrowRanges(data: { kind: "frag" | "smoke"; rings: Array<{ x: number; y: number; r: number }> } | null): void;
+  /** center on your spawn with YOUR side at the bottom of the screen */
+  deployView(xMm: number, yMm: number): void;
   onGroundClick(cb: (xMm: number, yMm: number, shift: boolean) => void): void;
   onGroundLeftClick(cb: (xMm: number, yMm: number) => void): void;
   onSoldierClick(cb: (id: number) => void): void;
@@ -879,8 +881,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneApi {
   layoutCamera();
   frame();
 
+  function deployView(xMm: number, yMm: number): void {
+    camTarget.set(xMm / 1000, 0, yMm / 1000);
+    // camera sits on the +cos/+sin side of the target; that side reads as
+    // the BOTTOM of the screen. Northern spawns need the flipped angle.
+    yaw = yMm < (MAP_H * 1000) / 2 ? Math.PI / 4 + Math.PI : Math.PI / 4;
+    layoutCamera();
+  }
+
   return {
     updateSoldiers,
+    deployView,
     addShotEvents,
     updateEffects,
     updateZones,

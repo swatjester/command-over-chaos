@@ -107,6 +107,7 @@ export function App(): JSX.Element {
     if (!conn || !canvasRef.current) return;
     const scene = createScene(canvasRef.current);
     sceneRef.current = scene;
+    let oriented = false;
 
     const aliveSelected = (): SoldierSnapshot[] => {
       const byId = new Map((snapRef.current?.soldiers ?? []).map((s) => [s.id, s]));
@@ -116,6 +117,15 @@ export function App(): JSX.Element {
     };
 
     conn.onSnapshot((data) => {
+      if (!oriented) {
+        const mine = data.soldiers.filter((s) => conn.mySoldierIds.includes(s.id));
+        if (mine.length > 0) {
+          oriented = true;
+          const cx = Math.round(mine.reduce((a, s) => a + s.x, 0) / mine.length);
+          const cy = Math.round(mine.reduce((a, s) => a + s.y, 0) / mine.length);
+          scene.deployView(cx, cy);
+        }
+      }
       for (const sh of data.shots) {
         if (conn.mySoldierIds.includes(sh.target)) underFireRef.current.set(sh.target, Date.now());
       }
@@ -309,6 +319,7 @@ export function App(): JSX.Element {
         onStart={() => connRef.current?.sendLobby({ start: true })}
         onAddBot={(team, personality) => connRef.current?.sendLobby({ addBot: { team, personality } })}
         onRemoveBot={(id) => connRef.current?.sendLobby({ removeBot: id })}
+        onOptions={(o) => connRef.current?.sendLobby({ options: o })}
       />
     );
   }
@@ -341,7 +352,12 @@ export function App(): JSX.Element {
           <div style={{ display: "flex", gap: 10, alignSelf: "center", fontSize: 14, fontWeight: 800 }}>
             <span style={{ color: "#4da3ff" }}>{snap.vp[0]}</span>
             <span style={{ opacity: 0.4, fontWeight: 400, fontSize: 11, alignSelf: "center" }}>
-              VP · {snap.zones.filter((z) => z.owner === 0).length}/{snap.zones.filter((z) => z.owner === 1).length} flags
+              VP{snap.vpTarget > 0 ? ` · first to ${snap.vpTarget}` : ""} · {snap.zones.filter((z) => z.owner === 0).length}/{snap.zones.filter((z) => z.owner === 1).length} flags
+              {snap.timeLeft >= 0 && (
+                <span style={{ fontWeight: 700, color: snap.timeLeft < 60 * 30 ? "#e66a5a" : "#8b98a5" }}>
+                  {" "}· {Math.floor(snap.timeLeft / 1800)}:{String(Math.floor((snap.timeLeft % 1800) / 30)).padStart(2, "0")}
+                </span>
+              )}
             </span>
             <span style={{ color: "#ff9e4d" }}>{snap.vp[1]}</span>
           </div>
@@ -581,7 +597,7 @@ function ArchetypePicker({ archetype, onPick }: {
   );
 }
 
-function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onReady, onStart, onAddBot, onRemoveBot }: {
+function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onReady, onStart, onAddBot, onRemoveBot, onOptions }: {
   lobby: LobbyData | null;
   name: string;
   archetype: PlayableArchetype;
@@ -592,6 +608,7 @@ function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onRe
   onStart: () => void;
   onAddBot: (team: 0 | 1, personality: BotPersonality) => void;
   onRemoveBot: (id: string) => void;
+  onOptions: (o: { timeLimitMin: number; vpTarget: number }) => void;
 }): JSX.Element {
   const me = lobby?.players.find((p) => p.id === lobby.yourId);
   const allReady = (lobby?.players.length ?? 0) > 0 && (lobby?.players.every((p) => p.ready) ?? false);
@@ -604,8 +621,46 @@ function LobbyScreen({ lobby, name, archetype, onName, onArchetype, onTeam, onRe
           {lobby.countdown ?? 0}
         </div>
       )}
+      {lobby?.result && (
+        <div style={{
+          padding: "10px 26px", borderRadius: 10, textAlign: "center",
+          background: "#141a21", border: `1px solid ${lobby.result.winner === 0 ? "#4da3ff" : lobby.result.winner === 1 ? "#ff9e4d" : "#8b98a5"}`,
+        }}>
+          <div style={{
+            fontWeight: 800, fontSize: 18, letterSpacing: 2,
+            color: lobby.result.winner === 0 ? "#4da3ff" : lobby.result.winner === 1 ? "#ff9e4d" : "#8b98a5",
+          }}>
+            {lobby.result.winner === -1 ? "DRAW" : lobby.result.winner === 0 ? "BLUE WINS" : "ORANGE WINS"}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+            {lobby.result.reason === "wipe" ? "enemy side wiped out"
+              : lobby.result.reason === "vp" ? "VP target reached"
+              : lobby.result.reason === "time" ? "time expired — most VP"
+              : "round ended manually"} · final VP {lobby.result.vp[0]} — {lobby.result.vp[1]}
+          </div>
+        </div>
+      )}
       <div style={{ opacity: 0.6, fontSize: 13 }}>
         LOBBY — pick a side, choose your fireteam, ready up
+      </div>
+      <div style={{ display: "flex", gap: 18, alignItems: "center", fontSize: 12 }}>
+        <span style={{ opacity: 0.6 }}>round timer</span>
+        <select
+          value={lobby?.options.timeLimitMin ?? 15}
+          onChange={(e) => onOptions({ timeLimitMin: Number(e.target.value), vpTarget: lobby?.options.vpTarget ?? 500 })}
+          style={{ background: "#141a21", color: "#dfe7ee", border: "1px solid #2a3138", borderRadius: 6, padding: "5px 8px" }}
+        >
+          {[0, 5, 10, 15, 20, 30].map((m) => <option key={m} value={m}>{m === 0 ? "off" : `${m} min`}</option>)}
+        </select>
+        <span style={{ opacity: 0.6 }}>VP target</span>
+        <select
+          value={lobby?.options.vpTarget ?? 500}
+          onChange={(e) => onOptions({ timeLimitMin: lobby?.options.timeLimitMin ?? 15, vpTarget: Number(e.target.value) })}
+          style={{ background: "#141a21", color: "#dfe7ee", border: "1px solid #2a3138", borderRadius: 6, padding: "5px 8px" }}
+        >
+          {[0, 250, 500, 1000, 2000].map((v) => <option key={v} value={v}>{v === 0 ? "off" : v}</option>)}
+        </select>
+        <span style={{ opacity: 0.35, fontSize: 11 }}>timer winner = most VP · wipes always end the round</span>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
         <span style={{ opacity: 0.6 }}>callsign</span>

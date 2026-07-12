@@ -83,6 +83,13 @@ export const ClientMsgSchema = z.discriminatedUnion("t", [
     removeBot: z.string().optional(),
     /** end the current match: replay saved, everyone returns to the lobby */
     endMatch: z.boolean().optional(),
+    /** match options (lobby phase only) */
+    options: z.object({
+      /** minutes; 0 = no time limit */
+      timeLimitMin: z.number().int().min(0).max(120),
+      /** VP total to win; 0 = off */
+      vpTarget: z.number().int().min(0).max(100000),
+    }).optional(),
   }),
 ]);
 export type ClientMsg = z.infer<typeof ClientMsgSchema>;
@@ -173,6 +180,18 @@ export const ZoneSnapshotSchema = z.object({
   contested: z.boolean(),
 });
 
+export const MatchOptionsSchema = z.object({
+  timeLimitMin: z.number().int(),
+  vpTarget: z.number().int(),
+});
+
+export const MatchResultSchema = z.object({
+  /** -1 = draw */
+  winner: z.number().int(),
+  reason: z.enum(["wipe", "vp", "time", "manual"]),
+  vp: z.tuple([z.number().int(), z.number().int()]),
+});
+
 export const LobbyPlayerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -192,6 +211,9 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
     yourId: z.string(),
     countdown: z.number().int().optional(),
     players: z.array(LobbyPlayerSchema),
+    options: MatchOptionsSchema,
+    /** how the last round ended, if one has ended */
+    result: MatchResultSchema.optional(),
   }),
   // the match begins: your squad now exists
   z.object({
@@ -222,6 +244,10 @@ export const ServerMsgSchema = z.discriminatedUnion("t", [
     vp: z.tuple([z.number().int(), z.number().int()]),
     /** pre-match deploy ticks remaining (0 = live) */
     deploy: z.number().int(),
+    /** ticks left on the round clock; -1 = no limit */
+    timeLeft: z.number().int(),
+    /** VP total that ends the round; 0 = off */
+    vpTarget: z.number().int(),
   }),
   z.object({ t: z.literal("pong"), n: z.number().int() }),
 ]);
@@ -229,6 +255,8 @@ export type ServerMsg = z.infer<typeof ServerMsgSchema>;
 export type LobbyPlayer = z.infer<typeof LobbyPlayerSchema>;
 export type Archetype = z.infer<typeof ArchetypeSchema>;
 export type ZoneSnapshot = z.infer<typeof ZoneSnapshotSchema>;
+export type MatchOptions = z.infer<typeof MatchOptionsSchema>;
+export type MatchResult = z.infer<typeof MatchResultSchema>;
 export type SoldierSnapshot = z.infer<typeof SoldierSnapshotSchema>;
 export type ShotEvent = z.infer<typeof ShotEventSchema>;
 export type GrenadeSnapshot = z.infer<typeof GrenadeSnapshotSchema>;

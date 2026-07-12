@@ -11,8 +11,8 @@ import {
 import { ARCHETYPE_KITS, type PlayableArchetype } from "@coc/shared";
 import {
   ServerMsgSchema, type Boom, type ClientMsg, type GrenadeSnapshot,
-  type LobbyPlayer, type ShotEvent, type SmokeSnapshot, type SoldierSnapshot,
-  type ZoneSnapshot,
+  type LobbyPlayer, type MatchOptions, type MatchResult, type ShotEvent,
+  type SmokeSnapshot, type SoldierSnapshot, type ZoneSnapshot,
 } from "@coc/protocol";
 
 export interface SnapshotData {
@@ -26,6 +26,10 @@ export interface SnapshotData {
   vp: [number, number];
   /** pre-match deploy ticks remaining (0 = live) */
   deploy: number;
+  /** ticks left on the round clock; -1 = no limit */
+  timeLeft: number;
+  /** VP total that ends the round; 0 = off */
+  vpTarget: number;
 }
 export type SnapshotCb = (data: SnapshotData) => void;
 
@@ -34,6 +38,8 @@ export interface LobbyData {
   yourId: string;
   countdown?: number;
   players: LobbyPlayer[];
+  options: MatchOptions;
+  result?: MatchResult;
 }
 
 export interface LobbyAction {
@@ -45,10 +51,13 @@ export interface LobbyAction {
   addBot?: { team: 0 | 1; personality: BotPersonality; archetype?: PlayableArchetype };
   removeBot?: string;
   endMatch?: boolean;
+  options?: MatchOptions;
 }
 
 export interface Connection {
   mode: "online" | "offline";
+  /** your side (welcome msg; offline = 0) */
+  team: 0 | 1;
   /** empty while in the lobby; filled by the welcome (reclaim/late join) or start message */
   mySoldierIds: number[];
   sendOrders(orders: Order[]): void;
@@ -94,6 +103,7 @@ export function connectOnline(
         clearTimeout(timeout);
         const conn: Connection = {
           mode: "online",
+          team: msg.team,
           mySoldierIds: [...msg.yourSoldierIds],
           sendOrders: (orders) => {
             ws.send(JSON.stringify({ t: "orders", orders } satisfies ClientMsg));
@@ -169,11 +179,14 @@ export function createOffline(
       zones: structuredClone(state.zones),
       vp: [state.vp[0], state.vp[1]],
       deploy: state.deploy,
+      timeLeft: -1,
+      vpTarget: 0,
     });
   }, TICK_MS);
 
   return {
     mode: "offline",
+    team: 0,
     mySoldierIds: [0, 1, 2, 3],
     sendOrders: (orders) => pending.push(...orders),
     sendLobby: () => { /* no lobby offline */ },
